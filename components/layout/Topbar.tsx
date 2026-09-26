@@ -3,11 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, LogOut, Menu, Search, Settings } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Menu, Settings } from 'lucide-react';
 import { Role } from '@/types';
 import { Avatar } from '@/components/ui/Avatar';
 import { RFTMark } from '@/components/layout/RFTMark';
-import { lecturerTopTabs } from '@/lib/navigation';
+import { GlobalSearchBar } from '@/components/layout/GlobalSearchBar';
 
 interface TopbarProps {
   role: Role;
@@ -18,19 +18,12 @@ interface TopbarProps {
   onLogout: () => void;
 }
 
-const searchPlaceholder = {
-  super_admin: 'Search schools, metrics, resources...',
-  school_admin: 'Search faculties, lecturers, students...',
-  lecturer: 'Search courses, students, content...',
-};
-
 export function Topbar({ role, school, userName, userTitle, onMenuOpen, onLogout }: TopbarProps) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const schoolName = typeof school === 'object' ? (school as any)?.name || 'Academic Faculty' : (school || 'Academic Faculty');
-
 
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
@@ -43,12 +36,10 @@ export function Topbar({ role, school, userName, userTitle, onMenuOpen, onLogout
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-
-
   const isSuperAdmin = role === 'super_admin';
 
   return (
-    <header className={`sticky top-0 z-50 flex h-16 items-center justify-between border-b px-4 backdrop-blur md:px-6 ${
+    <header className={`sticky top-0 z-40 flex h-16 items-center justify-between border-b px-4 backdrop-blur md:px-6 ${
       isSuperAdmin ? 'border-[#edf0fb] bg-white' : 'border-gray-100 bg-white/95'
     }`}>
       <div className="flex items-center gap-4">
@@ -72,15 +63,8 @@ export function Topbar({ role, school, userName, userTitle, onMenuOpen, onLogout
         )}
       </div>
 
-      {role !== 'lecturer' && (
-        <div className={`hidden flex-1 items-center rounded-full px-4 py-2 lg:flex ${isSuperAdmin ? 'mx-8 max-w-xs bg-[#f5f6fb]' : 'max-w-sm bg-surface'}`}>
-          <Search className="mr-3 h-4 w-4 text-text-muted" />
-          <input
-            placeholder={isSuperAdmin ? 'Global system search...' : searchPlaceholder[role]}
-            className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
-          />
-        </div>
-      )}
+      {/* Global Interactive Search for all roles */}
+      <GlobalSearchBar role={role} isSuperAdmin={isSuperAdmin} />
 
       <div className="flex items-center gap-4">
         {role !== 'lecturer' && (
