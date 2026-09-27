@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { Download, Upload, Plus, FileText, X, CheckCircle2, AlertCircle, DollarSign, Settings, Trash2 } from 'lucide-react';
 import { Panel } from '@/components/ui/Panel';
-import { adminApiRequest } from '@/lib/apiClient';
+import { adminApiRequest, resolveMediaUrl, API_BASE_URL } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/components/providers/ToastProvider';
 
@@ -248,12 +248,11 @@ export function ContentLibraryPanel() {
   };
 
   const getSafeDownloadUrl = (url?: string) => {
-    if (!url) return 'http://localhost:3006/uploads/sample_past_question.pdf';
-    if (url.includes('supabase.co')) {
-      const filename = url.split('/').pop() || 'sample_past_question.pdf';
-      return `http://localhost:3006/uploads/${filename}`;
+    if (!url) {
+      const apiHost = API_BASE_URL.replace(/\/v1\/?$/, '');
+      return `${apiHost}/uploads/sample_past_question.pdf`;
     }
-    return url;
+    return resolveMediaUrl(url);
   };
 
   return (

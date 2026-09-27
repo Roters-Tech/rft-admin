@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Megaphone, Plus, RefreshCw, X, CheckCircle2, Trash2, Calendar, BookOpen, AlertCircle, Pencil, ImageIcon } from 'lucide-react';
+import { Megaphone, Plus, RefreshCw, X, CheckCircle2, Trash2, Calendar, Building2, User, Pencil, ImageIcon, AlertCircle, Globe } from 'lucide-react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { adminApiRequest, resolveMediaUrl, FALLBACK_ANNOUNCEMENT_IMAGE } from '@/lib/apiClient';
-import { useAuth } from '@/hooks/useAuth';
 
 interface Announcement {
   id: string;
@@ -13,28 +12,32 @@ interface Announcement {
   type?: string;
   imageUrl?: string | null;
   audienceType?: string;
-  courseId?: string | null;
-  course?: { code: string; name: string };
+  schoolId?: string | null;
+  school?: { id: string; name: string; code?: string };
   createdAt: string;
-  authorId?: string;
-  authorRole?: string;
-  author?: { fullName: string; role: string; id?: string };
+  author?: { fullName: string; role?: string };
 }
 
-export default function LecturerAnnouncementsPage() {
-  const { user } = useAuth();
+interface School {
+  id: string;
+  name: string;
+  code?: string;
+}
+
+export default function SuperAdminAnnouncementsPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [courses, setCourses] = useState<any[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
+  const [filterSchoolId, setFilterSchoolId] = useState('ALL');
 
   // Create Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
-  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [targetSchoolId, setTargetSchoolId] = useState('');
   const [type, setType] = useState('NEWS');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -43,7 +46,7 @@ export default function LecturerAnnouncementsPage() {
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editMessage, setEditMessage] = useState('');
-  const [editSelectedCourseId, setEditSelectedCourseId] = useState('');
+  const [editTargetSchoolId, setEditTargetSchoolId] = useState('');
   const [editType, setEditType] = useState('NEWS');
   const [editImageFile, setEditImageFile] = useState<File | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -52,33 +55,31 @@ export default function LecturerAnnouncementsPage() {
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<Announcement | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const fetchAnnouncementsAndCourses = async () => {
+  const fetchData = async () => {
     setLoading(true);
     setError('');
     try {
-      const coursesEndpoint = user?.id ? `/courses?lecturerId=${user.id}` : '/courses';
-
-      const [annsData, coursesData] = await Promise.all([
+      const [annsData, schoolsData] = await Promise.all([
         adminApiRequest('/announcements').catch(() => []),
-        adminApiRequest(coursesEndpoint).catch(() => []),
+        adminApiRequest('/schools').catch(() => []),
       ]);
 
       if (Array.isArray(annsData)) {
         setAnnouncements(annsData);
       }
-      if (Array.isArray(coursesData)) {
-        setCourses(coursesData);
+      if (Array.isArray(schoolsData)) {
+        setSchools(schoolsData);
       }
     } catch (err: any) {
-      setError(err?.message || 'Failed to fetch announcements');
+      setError(err?.message || 'Failed to load announcements');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAnnouncementsAndCourses();
-  }, [user?.id]);
+    fetchData();
+  }, []);
 
   const handlePostAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,10 +91,10 @@ export default function LecturerAnnouncementsPage() {
       const formData = new FormData();
       formData.append('title', title.trim());
       formData.append('message', message.trim());
-      formData.append('audienceType', 'COURSE');
+      formData.append('audienceType', targetSchoolId ? 'SCHOOL' : 'ALL');
       formData.append('type', type);
-      if (selectedCourseId) {
-        formData.append('courseId', selectedCourseId);
+      if (targetSchoolId) {
+        formData.append('schoolId', targetSchoolId);
       }
       if (imageFile) {
         formData.append('image', imageFile);
@@ -104,14 +105,14 @@ export default function LecturerAnnouncementsPage() {
         body: formData,
       });
 
-      setSuccess('Announcement broadcasted to enrolled students!');
+      setSuccess('Platform announcement broadcasted successfully!');
       setTitle('');
       setMessage('');
-      setSelectedCourseId('');
+      setTargetSchoolId('');
       setType('NEWS');
       setImageFile(null);
       setIsModalOpen(false);
-      fetchAnnouncementsAndCourses();
+      fetchData();
     } catch (err: any) {
       setError(err?.message || 'Failed to post announcement');
     } finally {
@@ -123,7 +124,7 @@ export default function LecturerAnnouncementsPage() {
     setEditingAnnouncement(ann);
     setEditTitle(ann.title || '');
     setEditMessage(ann.message || '');
-    setEditSelectedCourseId(ann.courseId || '');
+    setEditTargetSchoolId(ann.schoolId || '');
     setEditType(ann.type || 'NEWS');
     setEditImageFile(null);
   };
@@ -139,7 +140,8 @@ export default function LecturerAnnouncementsPage() {
       formData.append('title', editTitle.trim());
       formData.append('message', editMessage.trim());
       formData.append('type', editType);
-      formData.append('courseId', editSelectedCourseId || '');
+      formData.append('schoolId', editTargetSchoolId || '');
+      formData.append('audienceType', editTargetSchoolId ? 'SCHOOL' : 'ALL');
       if (editImageFile) {
         formData.append('image', editImageFile);
       }
@@ -151,7 +153,7 @@ export default function LecturerAnnouncementsPage() {
 
       setSuccess('Announcement updated successfully!');
       setEditingAnnouncement(null);
-      fetchAnnouncementsAndCourses();
+      fetchData();
     } catch (err: any) {
       setError(err?.message || 'Failed to update announcement');
     } finally {
@@ -163,9 +165,9 @@ export default function LecturerAnnouncementsPage() {
     setDeletingId(id);
     try {
       await adminApiRequest(`/announcements/${id}`, { method: 'DELETE' });
-      setSuccess('Announcement removed successfully.');
+      setSuccess('Announcement deleted.');
       setDeleteConfirmItem(null);
-      fetchAnnouncementsAndCourses();
+      fetchData();
     } catch (err: any) {
       setError(err?.message || 'Failed to delete announcement');
     } finally {
@@ -173,23 +175,32 @@ export default function LecturerAnnouncementsPage() {
     }
   };
 
-  const filteredAnnouncements = announcements.filter(
-    (a) =>
+  const filteredAnnouncements = announcements.filter((a) => {
+    const matchesSchool =
+      filterSchoolId === 'ALL'
+        ? true
+        : filterSchoolId === 'GLOBAL'
+        ? !a.schoolId
+        : a.schoolId === filterSchoolId;
+
+    const matchesSearch =
       a.title.toLowerCase().includes(search.toLowerCase()) ||
       a.message.toLowerCase().includes(search.toLowerCase()) ||
-      (a.course?.code && a.course.code.toLowerCase().includes(search.toLowerCase())) ||
-      (a.author?.fullName && a.author.fullName.toLowerCase().includes(search.toLowerCase()))
-  );
+      (a.school?.name && a.school.name.toLowerCase().includes(search.toLowerCase())) ||
+      (a.author?.fullName && a.author.fullName.toLowerCase().includes(search.toLowerCase()));
+
+    return matchesSchool && matchesSearch;
+  });
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Course & Department Announcements"
-        subtitle="Broadcast notices, assignment updates, and lecture schedules directly to students."
+        title="Platform Announcements"
+        subtitle="Manage global bulletins and school-specific notices across the entire RFT network."
         actions={
           <div className="flex items-center gap-3">
             <button
-              onClick={fetchAnnouncementsAndCourses}
+              onClick={fetchData}
               disabled={loading}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-semibold text-text-secondary hover:bg-surface"
             >
@@ -228,21 +239,37 @@ export default function LecturerAnnouncementsPage() {
         </div>
       )}
 
-      {/* Filter / Search Bar */}
-      <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
+      {/* Filters & Search */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
         <input
           type="text"
-          placeholder="Search announcements by title, course code, or content..."
+          placeholder="Search announcements by title, message, or school..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full max-w-md rounded-xl border border-gray-200 px-4 py-2 text-xs outline-none focus:border-brand-primary"
+          className="w-full md:max-w-md rounded-xl border border-gray-200 px-4 py-2 text-xs outline-none focus:border-brand-primary"
         />
-        <span className="text-xs text-gray-500 font-medium">
-          Total Broadcasts: <strong className="text-brand-navy">{filteredAnnouncements.length}</strong>
-        </span>
+
+        <div className="flex items-center gap-3">
+          <select
+            value={filterSchoolId}
+            onChange={(e) => setFilterSchoolId(e.target.value)}
+            className="rounded-xl border border-gray-200 px-3 py-2 text-xs outline-none focus:border-brand-primary bg-white text-gray-700 font-medium"
+          >
+            <option value="ALL">All Schools & Global</option>
+            <option value="GLOBAL">Global Only (No School Target)</option>
+            {schools.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+
+          <span className="text-xs text-gray-500 font-medium whitespace-nowrap">
+            Total: <strong className="text-brand-navy">{filteredAnnouncements.length}</strong>
+          </span>
+        </div>
       </div>
 
-      {/* Announcements List */}
       {loading ? (
         <div className="flex py-12 justify-center items-center text-sm text-gray-500">
           <RefreshCw className="h-5 w-5 animate-spin mr-2" />
@@ -251,9 +278,9 @@ export default function LecturerAnnouncementsPage() {
       ) : filteredAnnouncements.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-gray-200 bg-white p-12 text-center">
           <Megaphone className="mx-auto h-12 w-12 text-gray-300 mb-3" />
-          <h3 className="text-base font-bold text-brand-navy">No Announcements Broadcasted Yet</h3>
+          <h3 className="text-base font-bold text-brand-navy">No Announcements Found</h3>
           <p className="mt-1 text-xs text-gray-500 max-w-md mx-auto">
-            Post an announcement to notify students in your courses about lecture schedule changes, assignment deadlines, or test notices.
+            Broadcast platform updates, maintenance alerts, or institution notices across the network.
           </p>
           <button
             onClick={() => setIsModalOpen(true)}
@@ -264,12 +291,9 @@ export default function LecturerAnnouncementsPage() {
           </button>
         </div>
       ) : (
-        <div className="grid gap-4">
+        <div className="space-y-4">
           {filteredAnnouncements.map((ann) => (
-            <div
-              key={ann.id}
-              className="overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col"
-            >
+            <div key={ann.id} className="overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-xl shadow-slate-100/50">
               {ann.imageUrl && (
                 <div className="w-full bg-slate-50 border-b border-gray-100 overflow-hidden">
                   <img
@@ -280,93 +304,75 @@ export default function LecturerAnnouncementsPage() {
                       target.onerror = null;
                       target.src = FALLBACK_ANNOUNCEMENT_IMAGE;
                     }}
-                    className="h-48 sm:h-60 w-full object-cover"
+                    className="h-52 sm:h-64 w-full object-cover"
                   />
                 </div>
               )}
 
-              <div className="p-6 flex flex-col md:flex-row md:items-start justify-between gap-4">
-                <div className="space-y-2 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-navy/10 px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-brand-navy">
-                      <Megaphone className="h-3 w-3" />
-                      {ann.audienceType || 'STUDENTS'}
-                    </span>
-                    {ann.type && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-700">
-                        {ann.type}
+              <div className="p-6">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between border-b border-gray-100 pb-4 gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Megaphone className="h-5 w-5 text-brand-primary" />
+                      <h3 className="text-base font-bold text-brand-navy">{ann.title}</h3>
+                      {ann.school ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-700 border border-blue-200">
+                          <Building2 className="h-3 w-3" />
+                          {ann.school.name}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
+                          <Globe className="h-3 w-3" />
+                          Global Platform
+                        </span>
+                      )}
+                      {ann.type && (
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-700">
+                          {ann.type}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-1.5 flex items-center gap-4 text-xs text-gray-400">
+                      <span className="flex items-center gap-1">
+                        <User className="h-3.5 w-3.5" />
+                        {ann.author?.fullName || 'Platform Administrator'}
                       </span>
-                    )}
-                    {ann.course && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-gold/20 px-3 py-1 text-[10px] font-extrabold text-brand-navy border border-brand-gold">
-                        <BookOpen className="h-3 w-3" />
-                        {ann.course.code}: {ann.course.name}
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3.5 w-3.5" />
+                        {new Date(ann.createdAt).toLocaleDateString(undefined, {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </span>
-                    )}
-                    <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(ann.createdAt).toLocaleDateString(undefined, {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
+                    </div>
                   </div>
 
-                  <h3 className="text-base font-bold text-brand-navy">{ann.title}</h3>
-
-                  <p className="text-xs sm:text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{ann.message}</p>
-
-                  {ann.author && (
-                    <p className="text-[11px] text-gray-400 pt-1 font-medium">
-                      Posted by: <strong className="text-gray-700">{ann.author.fullName}</strong>
-                    </p>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-start">
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(ann)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                      title="Edit Announcement"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmItem(ann)}
+                      className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 transition"
+                      title="Delete Announcement"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
 
-                {(() => {
-                  const isOwnAnnouncement = Boolean(
-                    (ann.authorId && user?.id && ann.authorId === user.id) ||
-                    (ann.author && (ann.author as any).id === user?.id) ||
-                    (!ann.authorId && user?.name && ann.author?.fullName === user.name)
-                  );
-
-                  if (!isOwnAnnouncement) {
-                    return (
-                      <div className="shrink-0 self-end md:self-start">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600">
-                          {ann.authorRole === 'SUPER_ADMIN' || ann.author?.role === 'SUPER_ADMIN'
-                            ? 'Platform Broadcast'
-                            : 'Campus Notice'}
-                        </span>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="flex items-center gap-2 shrink-0 self-end md:self-start">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(ann)}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-600 hover:text-white transition-all shadow-sm"
-                        title="Edit Announcement"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirmItem(ann)}
-                        className="inline-flex items-center gap-1 rounded-xl bg-red-50 p-2 text-red-600 hover:bg-red-600 hover:text-white transition-all"
-                        title="Delete Announcement"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  );
-                })()}
+                <p className="mt-4 text-xs sm:text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">{ann.message}</p>
               </div>
             </div>
           ))}
@@ -382,7 +388,7 @@ export default function LecturerAnnouncementsPage() {
               <h3 className="text-base font-bold text-slate-900">Confirm Announcement Deletion</h3>
             </div>
             <p className="text-xs sm:text-sm text-slate-700 leading-relaxed mb-6">
-              Are you sure you want to delete <strong className="text-slate-900">"{deleteConfirmItem.title}"</strong>? This will remove the notice for all students.
+              Are you sure you want to delete <strong className="text-slate-900">"{deleteConfirmItem.title}"</strong>? This action cannot be undone.
             </p>
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
               <button
@@ -405,12 +411,12 @@ export default function LecturerAnnouncementsPage() {
         </div>
       )}
 
-      {/* Post New Announcement Modal */}
+      {/* Create Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-gray-100 pb-4">
-              <h3 className="text-base font-bold text-brand-navy">Post New Announcement</h3>
+              <h3 className="text-base font-bold text-brand-navy">Broadcast Platform Announcement</h3>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
               </button>
@@ -424,7 +430,7 @@ export default function LecturerAnnouncementsPage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Mid-Semester Test Timetable & Submission Notice"
+                  placeholder="e.g. Scheduled System Maintenance Notice"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary"
@@ -433,17 +439,17 @@ export default function LecturerAnnouncementsPage() {
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                  Target Course (Optional)
+                  Target School (Optional - Leave blank for Global)
                 </label>
                 <select
-                  value={selectedCourseId}
-                  onChange={(e) => setSelectedCourseId(e.target.value)}
+                  value={targetSchoolId}
+                  onChange={(e) => setTargetSchoolId(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
                 >
-                  <option value="">All My Enrolled Courses</option>
-                  {courses.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.code}: {c.name}
+                  <option value="">Global (All Schools & Students)</option>
+                  {schools.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
                     </option>
                   ))}
                 </select>
@@ -458,9 +464,9 @@ export default function LecturerAnnouncementsPage() {
                   onChange={(e) => setType(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
                 >
-                  <option value="NEWS">Campus News / General</option>
-                  <option value="MATERIAL">Course Material Update</option>
-                  <option value="EXAM">Exam / Timetable Update</option>
+                  <option value="NEWS">General News & Updates</option>
+                  <option value="MATERIAL">Platform / System Notice</option>
+                  <option value="EXAM">Urgent / Important Notice</option>
                 </select>
               </div>
 
@@ -478,12 +484,12 @@ export default function LecturerAnnouncementsPage() {
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                  Announcement Details / Message Body *
+                  Announcement Content *
                 </label>
                 <textarea
                   required
-                  rows={4}
-                  placeholder="Type the message body to broadcast to students..."
+                  rows={5}
+                  placeholder="Type the announcement content..."
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary"
@@ -501,9 +507,9 @@ export default function LecturerAnnouncementsPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="rounded-xl bg-brand-navy px-5 py-2.5 text-xs font-bold text-white hover:bg-brand-navy/90 disabled:opacity-50"
+                  className="rounded-xl bg-brand-navy px-4 py-2 text-xs font-semibold text-white hover:bg-brand-navy/90 disabled:opacity-50"
                 >
-                  {submitting ? 'Broadcasting...' : 'Broadcast Announcement'}
+                  {submitting ? 'Broadcasting...' : 'Broadcast Notice'}
                 </button>
               </div>
             </form>
@@ -511,7 +517,7 @@ export default function LecturerAnnouncementsPage() {
         </div>
       )}
 
-      {/* Edit Announcement Modal */}
+      {/* Edit Modal */}
       {editingAnnouncement && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -538,7 +544,7 @@ export default function LecturerAnnouncementsPage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Mid-Semester Test Timetable & Submission Notice"
+                  placeholder="e.g. Scheduled System Maintenance Notice"
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary"
@@ -547,17 +553,17 @@ export default function LecturerAnnouncementsPage() {
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                  Target Course (Optional)
+                  Target School (Optional - Leave blank for Global)
                 </label>
                 <select
-                  value={editSelectedCourseId}
-                  onChange={(e) => setEditSelectedCourseId(e.target.value)}
+                  value={editTargetSchoolId}
+                  onChange={(e) => setEditTargetSchoolId(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
                 >
-                  <option value="">All My Enrolled Courses</option>
-                  {courses.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.code}: {c.name}
+                  <option value="">Global (All Schools & Students)</option>
+                  {schools.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
                     </option>
                   ))}
                 </select>
@@ -572,9 +578,9 @@ export default function LecturerAnnouncementsPage() {
                   onChange={(e) => setEditType(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
                 >
-                  <option value="NEWS">Campus News / General</option>
-                  <option value="MATERIAL">Course Material Update</option>
-                  <option value="EXAM">Exam / Timetable Update</option>
+                  <option value="NEWS">General News & Updates</option>
+                  <option value="MATERIAL">Platform / System Notice</option>
+                  <option value="EXAM">Urgent / Important Notice</option>
                 </select>
               </div>
 
@@ -606,12 +612,12 @@ export default function LecturerAnnouncementsPage() {
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                  Announcement Details / Message Body *
+                  Announcement Content *
                 </label>
                 <textarea
                   required
-                  rows={4}
-                  placeholder="Type the message body to broadcast to students..."
+                  rows={5}
+                  placeholder="Type the announcement content..."
                   value={editMessage}
                   onChange={(e) => setEditMessage(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary"
@@ -641,4 +647,3 @@ export default function LecturerAnnouncementsPage() {
     </div>
   );
 }
-

@@ -22,7 +22,6 @@ export function LecturerList({ items }: LecturerListProps) {
               <p className="text-xs text-text-secondary">{item.department}</p>
             </div>
           </div>
-          <ChevronRight className="h-4 w-4 text-text-muted" />
         </button>
       ))}
     </div>

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, LogOut, Menu, Settings } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Menu, Settings, User } from 'lucide-react';
 import { Role } from '@/types';
 import { Avatar } from '@/components/ui/Avatar';
 import { RFTMark } from '@/components/layout/RFTMark';
@@ -100,14 +100,24 @@ export function Topbar({ role, school, userName, userTitle, onMenuOpen, onLogout
             <ChevronDown className="hidden h-4 w-4 text-text-muted sm:block" />
           </button>
           {menuOpen ? (
-            <div className="absolute right-0 top-12 z-20 w-44 rounded-2xl border border-gray-100 bg-white p-2 shadow-card">
+            <div className="absolute right-0 top-12 z-20 w-48 rounded-2xl border border-gray-100 bg-white p-2 shadow-xl animate-in fade-in zoom-in-95 duration-150">
+              {role === 'lecturer' && (
+                <Link
+                  href="/dashboard/lecturer/profile"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-brand-navy transition-all duration-200 ease-in-out mb-1"
+                >
+                  <User className="h-4 w-4 text-brand-navy" />
+                  Profile
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
                   onLogout();
                 }}
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-red-500 transition-all duration-200 ease-in-out hover:bg-red-50"
+                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-red-500 transition-all duration-200 ease-in-out hover:bg-red-50"
               >
                 <LogOut className="h-4 w-4" />
                 Log out

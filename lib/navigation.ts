@@ -28,6 +28,7 @@ export const dashboardNav: Record<Role, NavItem[]> = {
     { label: 'SCHOOLS', href: '/dashboard/super/schools', icon: Building2 },
     { label: 'SUBSCRIPTIONS', href: '/dashboard/super/fees', icon: CreditCard },
     { label: 'USER ROLES', href: '/dashboard/super/roles', icon: UserRoundCog },
+    { label: 'ANNOUNCEMENTS', href: '/dashboard/super/announcements', icon: Megaphone },
     { label: 'ANONYMOUS MESSAGES', href: '/dashboard/super/messages', icon: MessageSquare },
     { label: 'GLOBAL ANALYTICS', href: '/dashboard/super/analytics', icon: LineChart },
   ],
@@ -37,12 +38,13 @@ export const dashboardNav: Record<Role, NavItem[]> = {
     { label: 'LECTURERS', href: '/dashboard/school/lecturers', icon: GraduationCap },
     { label: 'STUDENTS', href: '/dashboard/school/students', icon: Users },
     { label: 'ANNOUNCEMENTS', href: '/dashboard/school/announcements', icon: Megaphone },
-    { label: 'ANONYMOUS MESSAGES', href: '/dashboard/school/messages', icon: MessageSquare },
+    // { label: 'ANONYMOUS MESSAGES', href: '/dashboard/school/messages', icon: MessageSquare }, // Temporarily disabled
     { label: 'CONTENT', href: '/dashboard/school/content', icon: FileText },
     { label: 'BILLING & SUB', href: '/dashboard/school/billing', icon: CreditCard },
   ],
   lecturer: [
     { label: 'My Courses', href: '/dashboard/lecturer', icon: BookOpen, exact: true },
+    { label: 'My Profile', href: '/dashboard/lecturer/profile', icon: UserRoundCog },
     { label: 'Announcements', href: '/dashboard/lecturer/announcements', icon: Megaphone },
     { label: 'Departments & Students', href: '/dashboard/lecturer/class-reps', icon: Users },
     { label: 'Content Upload', href: '/dashboard/lecturer/content', icon: Upload },
@@ -60,6 +62,7 @@ export function getNavItems(role?: string): NavItem[] {
 
 export const lecturerTopTabs = [
   { label: 'Dashboard', href: '/dashboard/lecturer', exact: true },
+  { label: 'Profile', href: '/dashboard/lecturer/profile' },
   { label: 'Announcements', href: '/dashboard/lecturer/announcements' },
   { label: 'Class Reps & Students', href: '/dashboard/lecturer/class-reps' },
   { label: 'Content', href: '/dashboard/lecturer/content' },
@@ -68,6 +71,7 @@ export const lecturerTopTabs = [
 ];
 
 export const lecturerQuickLinks = [
+  { label: 'My Profile', href: '/dashboard/lecturer/profile', icon: UserRoundCog },
   { label: 'Settings', href: '/dashboard/lecturer/settings', icon: Settings },
   { label: 'Help', href: '/dashboard/lecturer/help', icon: HelpCircle },
 ];

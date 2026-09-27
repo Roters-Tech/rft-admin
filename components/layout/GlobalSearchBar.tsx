@@ -131,6 +131,15 @@ export function GlobalSearchBar({ role, isSuperAdmin }: GlobalSearchBarProps) {
           keywords: ['anonymous', 'inbox', 'student messages', 'reports', 'feedback'],
         },
         {
+          id: 'super-announcements',
+          title: 'Platform Announcements',
+          subtitle: 'Broadcast platform notices and school-specific bulletins',
+          href: '/dashboard/super/announcements',
+          category: 'Navigation',
+          icon: Megaphone,
+          keywords: ['announcements', 'broadcast', 'bulletin', 'news', 'notice', 'edit announcement'],
+        },
+        {
           id: 'super-analytics',
           title: 'Global Analytics & Growth',
           subtitle: 'Platform usage trends, engagement metrics, and growth reports',
@@ -208,6 +217,7 @@ export function GlobalSearchBar({ role, isSuperAdmin }: GlobalSearchBarProps) {
           icon: Megaphone,
           keywords: ['news', 'broadcasts', 'notices', 'alerts', 'announcements'],
         },
+        /*
         {
           id: 'school-messages',
           title: 'Anonymous Student Messages',
@@ -217,6 +227,7 @@ export function GlobalSearchBar({ role, isSuperAdmin }: GlobalSearchBarProps) {
           icon: MessageSquare,
           keywords: ['inbox', 'anonymous', 'feedback', 'student inquiries', 'complaints'],
         },
+        */
         {
           id: 'school-content',
           title: 'Academic Content & Past Questions',
@@ -267,6 +278,15 @@ export function GlobalSearchBar({ role, isSuperAdmin }: GlobalSearchBarProps) {
         category: 'Navigation',
         icon: BookOpen,
         keywords: ['courses', 'classes', 'teaching', 'lectures', 'subjects'],
+      },
+      {
+        id: 'lec-profile',
+        title: 'My Profile & Portfolio',
+        subtitle: 'Academic bio, certifications, achievements, and upload stats',
+        href: '/dashboard/lecturer/profile',
+        category: 'Navigation',
+        icon: UserRoundCog,
+        keywords: ['profile', 'bio', 'certifications', 'achievements', 'portfolio', 'cv', 'experience', 'my profile'],
       },
       {
         id: 'lec-announcements',

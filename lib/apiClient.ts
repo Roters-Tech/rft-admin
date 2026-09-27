@@ -1,5 +1,26 @@
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3006/v1';
 
+export function resolveMediaUrl(url?: string | null): string {
+  if (!url) return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+
+  const apiHost = API_BASE_URL.replace(/\/v1\/?$/, '');
+
+  if (trimmed.startsWith('http://localhost:8080')) {
+    return trimmed.replace('http://localhost:8080', apiHost);
+  }
+  if (trimmed.startsWith('http://localhost:3000')) {
+    return trimmed.replace('http://localhost:3000', apiHost);
+  }
+  if (trimmed.startsWith('/uploads/')) {
+    return `${apiHost}${trimmed}`;
+  }
+  return trimmed;
+}
+
+export const FALLBACK_ANNOUNCEMENT_IMAGE = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="320" viewBox="0 0 600 320" fill="none"><rect width="600" height="320" fill="%230F172A"/><rect x="16" y="16" width="568" height="288" rx="16" fill="%231E293B" stroke="%23334155" stroke-width="2"/><circle cx="300" cy="130" r="40" fill="%2338BDF8" fill-opacity="0.15"/><path d="M285 130L296 141L316 121" stroke="%2338BDF8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><text x="300" y="200" fill="%23F8FAFC" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" text-anchor="middle">Academic Broadcast Notice</text><text x="300" y="228" fill="%2394A3B8" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="500" text-anchor="middle">Official Campus Media Attachment</text></svg>`;
+
 export function getAdminToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('rft_admin_token') || getCookie('rft_token');
@@ -54,10 +75,16 @@ export async function adminApiRequest<T = any>(
     }
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+    });
+  } catch (netErr: any) {
+    console.warn(`[API Client Network Error] Failed to reach ${url}:`, netErr?.message || netErr);
+    throw new Error('Backend server is unreachable. Please ensure your backend is running on port 3006.');
+  }
 
   const text = await response.text();
   let data: any;
