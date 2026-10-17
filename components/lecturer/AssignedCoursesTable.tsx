@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { BookOpen, RefreshCw, Plus, Check, X, Layers, Building } from 'lucide-react';
 import { adminApiRequest } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/components/providers/ToastProvider';
+import { SearchableSelect, SearchableOption } from '@/components/ui/SearchableSelect';
 
 export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: () => void }) {
   const { user } = useAuth();
@@ -18,6 +19,12 @@ export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: 
   const [availableCourses, setAvailableCourses] = useState<any[]>([]);
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Faculties & Departments state
+  const [faculties, setFaculties] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [selectedFacultyId, setSelectedFacultyId] = useState('');
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
 
   // New Course Form Fields
   const [newCode, setNewCode] = useState('');
@@ -44,6 +51,59 @@ export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: 
 
   const [loadingAvailable, setLoadingAvailable] = useState(false);
 
+  const facultyOptions = useMemo(() => {
+    const opts: SearchableOption[] = [{ value: '', label: 'All Faculties / General', sublabel: `${departments.length} Total Departments` }];
+    faculties.forEach((f: any) => {
+      const depCount = departments.filter((d: any) => d.facultyId === f.id || d.faculty?.id === f.id).length || f.departments?.length || 0;
+      opts.push({
+        value: f.id,
+        label: f.name,
+        category: 'Faculty',
+        sublabel: `${depCount} Departments`,
+      });
+    });
+    return opts;
+  }, [faculties, departments]);
+
+  const departmentOptions = useMemo(() => {
+    let list = departments;
+    if (selectedFacultyId) {
+      const filtered = departments.filter((d: any) => d.facultyId === selectedFacultyId || d.faculty?.id === selectedFacultyId);
+      if (filtered.length > 0) {
+        list = filtered;
+      }
+    }
+
+    return list.map((d: any) => {
+      const facName = d.faculty?.name || faculties.find((f: any) => f.id === d.facultyId)?.name;
+      return {
+        value: d.id,
+        label: d.name,
+        category: facName || 'Department',
+      };
+    });
+  }, [selectedFacultyId, departments, faculties]);
+
+  const handleDepartmentChange = (deptId: string) => {
+    setSelectedDepartmentId(deptId);
+    const dept = departments.find((d: any) => d.id === deptId);
+    if (dept?.facultyId) {
+      setSelectedFacultyId(dept.facultyId);
+    } else if (dept?.faculty?.id) {
+      setSelectedFacultyId(dept.faculty.id);
+    }
+  };
+
+  const handleFacultyChange = (newFacId: string) => {
+    setSelectedFacultyId(newFacId);
+    if (newFacId) {
+      const matching = departments.filter((d: any) => d.facultyId === newFacId || d.faculty?.id === newFacId);
+      if (matching.length > 0 && !matching.some((d: any) => d.id === selectedDepartmentId)) {
+        setSelectedDepartmentId(matching[0].id);
+      }
+    }
+  };
+
   const openModal = async () => {
     setShowAddModal(true);
     setActiveTab('create');
@@ -52,24 +112,61 @@ export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: 
     setNewLevel('300');
     setNewUnits('3');
     setNewSemester('1');
+    setSelectedFacultyId('');
+    setSelectedDepartmentId('');
     setLoadingAvailable(true);
 
     try {
-      let data = await adminApiRequest('/courses/public').catch(() => null);
-      if (!Array.isArray(data) || data.length === 0) {
-        data = await adminApiRequest('/courses').catch(() => null);
-      }
-      if (!Array.isArray(data) || data.length === 0) {
-        data = await adminApiRequest('/admin/courses').catch(() => null);
-      }
-      if (Array.isArray(data)) {
-        setAvailableCourses(data);
+      const facsPromise = adminApiRequest('/admin/faculties')
+        .catch(() => null)
+        .then(async (res) => {
+          if (Array.isArray(res) && res.length > 0) return res;
+          return adminApiRequest('/faculties/public' + (user?.schoolId ? `?schoolId=${user.schoolId}` : '')).catch(() => []);
+        });
+
+      const depsPromise = adminApiRequest('/admin/departments' + (user?.schoolId ? `?schoolId=${user.schoolId}` : ''))
+        .catch(() => null)
+        .then(async (res) => {
+          if (Array.isArray(res) && res.length > 0) return res;
+          return adminApiRequest('/departments/public' + (user?.schoolId ? `?schoolId=${user.schoolId}` : '')).catch(() => []);
+        });
+
+      const [coursesData, facsData, depsData] = await Promise.all([
+        adminApiRequest('/courses/public').catch(() => null)
+          .then(async (d) => {
+            if (Array.isArray(d) && d.length > 0) return d;
+            return adminApiRequest('/courses').catch(() => []);
+          }),
+        facsPromise,
+        depsPromise,
+      ]);
+
+      if (Array.isArray(coursesData)) {
+        setAvailableCourses(coursesData);
       } else {
         setAvailableCourses([]);
       }
+
+      if (Array.isArray(facsData)) {
+        setFaculties(facsData);
+      }
+
+      let allDeps: any[] = [];
+      if (Array.isArray(depsData) && depsData.length > 0) {
+        allDeps = depsData;
+      } else if (Array.isArray(facsData) && facsData.length > 0) {
+        allDeps = facsData.flatMap((f: any) => (f.departments || []).map((d: any) => ({ ...d, faculty: f })));
+      }
+      setDepartments(allDeps);
+
+      // Preselect lecturer's department or first available department
+      if (user?.departmentId && allDeps.some((d: any) => d.id === user.departmentId)) {
+        handleDepartmentChange(user.departmentId);
+      } else if (allDeps.length > 0) {
+        handleDepartmentChange(allDeps[0].id);
+      }
     } catch (err) {
-      console.warn('Failed to fetch available courses:', err);
-      setAvailableCourses([]);
+      console.warn('Failed to fetch available courses / faculties:', err);
     } finally {
       setLoadingAvailable(false);
     }
@@ -85,6 +182,10 @@ export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: 
       showToast('Please enter a course title (e.g. Law of Evidence I)', 'error');
       return;
     }
+    if (!selectedDepartmentId) {
+      showToast('Please select both faculty and department for this course', 'error');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -96,7 +197,8 @@ export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: 
         credits: Number(newUnits) || 3,
         semester: Number(newSemester) || 1,
         schoolId: user?.schoolId,
-        departmentId: user?.departmentId,
+        departmentId: selectedDepartmentId,
+        facultyId: selectedFacultyId,
         lecturerIds: user?.id ? [user.id] : [],
       };
 
@@ -105,7 +207,7 @@ export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: 
         body: JSON.stringify(payload),
       });
 
-      showToast(`Course "${newCode.toUpperCase()}" created and added to your department successfully!`, 'success');
+      showToast(`Course "${newCode.toUpperCase()}" created and linked to department successfully!`, 'success');
       setShowAddModal(false);
       await fetchCourses();
       if (onCoursesUpdated) onCoursesUpdated();
@@ -263,6 +365,27 @@ export function AssignedCoursesTable({ onCoursesUpdated }: { onCoursesUpdated?: 
 
             {activeTab === 'create' ? (
               <form onSubmit={handleCreateNewCourse} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <SearchableSelect
+                    label="Faculty"
+                    value={selectedFacultyId}
+                    onChange={handleFacultyChange}
+                    options={facultyOptions}
+                    placeholder="All Faculties / Select Faculty..."
+                    emptyText="No faculties found"
+                  />
+
+                  <SearchableSelect
+                    label="Department"
+                    required
+                    value={selectedDepartmentId}
+                    onChange={handleDepartmentChange}
+                    options={departmentOptions}
+                    placeholder="Search or select department..."
+                    emptyText="No departments found"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">

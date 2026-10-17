@@ -26,6 +26,7 @@ export const dashboardNav: Record<Role, NavItem[]> = {
   super_admin: [
     { label: 'DASHBOARD', href: '/dashboard/super', icon: LayoutDashboard, exact: true },
     { label: 'SCHOOLS', href: '/dashboard/super/schools', icon: Building2 },
+    { label: 'COURSES', href: '/dashboard/super/courses', icon: BookOpen },
     { label: 'SUBSCRIPTIONS', href: '/dashboard/super/fees', icon: CreditCard },
     { label: 'USER ROLES', href: '/dashboard/super/roles', icon: UserRoundCog },
     { label: 'ANNOUNCEMENTS', href: '/dashboard/super/announcements', icon: Megaphone },
@@ -34,6 +35,7 @@ export const dashboardNav: Record<Role, NavItem[]> = {
   ],
   school_admin: [
     { label: 'OVERVIEW', href: '/dashboard/school', icon: LayoutDashboard, exact: true },
+    { label: 'COURSES', href: '/dashboard/school/courses', icon: BookOpen },
     { label: 'FACULTIES & DEPTS', href: '/dashboard/school/faculties', icon: Building2 },
     { label: 'LECTURERS', href: '/dashboard/school/lecturers', icon: GraduationCap },
     { label: 'STUDENTS', href: '/dashboard/school/students', icon: Users },

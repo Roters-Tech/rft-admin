@@ -1,7 +1,6 @@
 'use client';
-
-import React, { useState, useEffect } from 'react';
-import { Plus, UserCheck, RefreshCw, X, CheckCircle2, Search, Mail, ShieldAlert, KeyRound, Eye, Trash2, BookOpen, AlertCircle, Award, Trophy, FileText, Phone, ExternalLink, GraduationCap } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, UserCheck, RefreshCw, X, CheckCircle2, Search, Mail, ShieldAlert, KeyRound, Eye, Trash2, BookOpen, AlertCircle, Award, Trophy, FileText, Phone, ExternalLink, GraduationCap, Check } from 'lucide-react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { adminApiRequest } from '@/lib/apiClient';
 
@@ -40,6 +39,14 @@ export default function SchoolLecturersPage() {
   const [viewingLecturer, setViewingLecturer] = useState<Lecturer | null>(null);
   const [deleteConfirmLecturer, setDeleteConfirmLecturer] = useState<Lecturer | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Assign Courses Modal State
+  const [assigningLecturer, setAssigningLecturer] = useState<Lecturer | null>(null);
+  const [schoolCourses, setSchoolCourses] = useState<any[]>([]);
+  const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([]);
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  const [savingAssignment, setSavingAssignment] = useState(false);
+  const [courseSearch, setCourseSearch] = useState('');
 
   // Onboarding Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -146,6 +153,60 @@ export default function SchoolLecturersPage() {
     }
   };
 
+  const openAssignModal = async (lec: Lecturer) => {
+    setAssigningLecturer(lec);
+    setSelectedCourseIds((lec.taughtCourses || []).map((c: any) => c.id));
+    setCourseSearch('');
+    setLoadingCourses(true);
+    try {
+      const data = await adminApiRequest('/admin/courses');
+      if (Array.isArray(data)) {
+        setSchoolCourses(data);
+      }
+    } catch (err: any) {
+      console.warn('Failed to load courses for assignment:', err);
+    } finally {
+      setLoadingCourses(false);
+    }
+  };
+
+  const toggleCourseSelection = (courseId: string) => {
+    setSelectedCourseIds((prev) =>
+      prev.includes(courseId) ? prev.filter((id) => id !== courseId) : [...prev, courseId]
+    );
+  };
+
+  const handleSaveCoursesAssignment = async () => {
+    if (!assigningLecturer) return;
+    setSavingAssignment(true);
+    try {
+      await adminApiRequest(`/admin/users/${assigningLecturer.id}/courses`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          courseIds: selectedCourseIds,
+        }),
+      });
+      setSuccess(`Courses assigned to ${assigningLecturer.fullName} successfully!`);
+      setAssigningLecturer(null);
+      await fetchData();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to assign courses');
+    } finally {
+      setSavingAssignment(false);
+    }
+  };
+
+  const filteredSchoolCourses = useMemo(() => {
+    if (!courseSearch.trim()) return schoolCourses;
+    const q = courseSearch.toLowerCase();
+    return schoolCourses.filter(
+      (c) =>
+        c.code?.toLowerCase().includes(q) ||
+        c.name?.toLowerCase().includes(q) ||
+        c.department?.name?.toLowerCase().includes(q)
+    );
+  }, [schoolCourses, courseSearch]);
+
   const filteredLecturers = lecturers.filter(
     (l) =>
       l.fullName.toLowerCase().includes(search.toLowerCase()) ||
@@ -249,6 +310,7 @@ export default function SchoolLecturersPage() {
                 <th className="px-6 py-4">Lecturer Name</th>
                 <th className="px-6 py-4">Department</th>
                 <th className="px-6 py-4">Contact Info</th>
+                <th className="px-6 py-4">Assigned Courses</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
@@ -277,6 +339,22 @@ export default function SchoolLecturersPage() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
+                    <div className="flex flex-wrap items-center gap-1.5 max-w-[200px]">
+                      {lec.taughtCourses && lec.taughtCourses.length > 0 ? (
+                        lec.taughtCourses.map((c) => (
+                          <span
+                            key={c.id}
+                            className="inline-flex items-center rounded-lg bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 px-2 py-0.5 text-[11px] font-bold text-sky-700 dark:text-sky-300"
+                          >
+                            {c.code}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-[11px] text-gray-400 italic">No courses</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
                     <span
                       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
                         lec.status === 'ACTIVE'
@@ -289,6 +367,15 @@ export default function SchoolLecturersPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openAssignModal(lec)}
+                        className="inline-flex items-center gap-1 rounded-xl bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 text-sky-700 dark:text-sky-300 px-2.5 py-1.5 font-bold text-xs transition"
+                        title="Assign Courses to Lecturer"
+                      >
+                        <BookOpen className="h-3.5 w-3.5" />
+                        Assign Courses
+                      </button>
                       <button
                         type="button"
                         onClick={() => setViewingLecturer(lec)}
@@ -696,6 +783,138 @@ export default function SchoolLecturersPage() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Assign Teaching Courses Modal */}
+      {assigningLecturer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold">
+                  <BookOpen className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    Assign Teaching Courses
+                  </h3>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    {assigningLecturer.fullName} • {assigningLecturer.department?.name || 'School Faculty'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssigningLecturer(null)}
+                className="rounded-xl p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search courses by code, title, or department..."
+                  value={courseSearch}
+                  onChange={(e) => setCourseSearch(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-surface dark:bg-slate-800/50 py-2 pl-9 pr-3 text-xs outline-none focus:border-brand-navy"
+                />
+              </div>
+              <span className="text-xs font-bold text-brand-navy dark:text-sky-400 whitespace-nowrap">
+                {selectedCourseIds.length} Selected
+              </span>
+            </div>
+
+            <div className="mt-3 flex-1 overflow-y-auto max-h-72 divide-y divide-gray-100 dark:divide-slate-800 rounded-2xl border border-gray-200 dark:border-slate-800 p-2 space-y-1">
+              {loadingCourses ? (
+                <div className="py-8 text-center text-xs text-text-muted flex items-center justify-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin text-brand-navy" />
+                  Loading institutional courses...
+                </div>
+              ) : filteredSchoolCourses.length === 0 ? (
+                <div className="py-8 text-center text-xs text-text-muted">
+                  No courses found. Create courses in Course Registry first.
+                </div>
+              ) : (
+                filteredSchoolCourses.map((c) => {
+                  const isSelected = selectedCourseIds.includes(c.id);
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => toggleCourseSelection(c.id)}
+                      className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition ${
+                        isSelected
+                          ? 'bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60'
+                          : 'hover:bg-gray-50 dark:hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`h-5 w-5 rounded-lg border flex items-center justify-center transition ${
+                            isSelected
+                              ? 'bg-brand-navy border-brand-navy text-white'
+                              : 'border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800'
+                          }`}
+                        >
+                          {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-brand-navy dark:text-sky-300 text-xs">
+                              {c.code}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                              {c.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-text-muted">
+                            <span>{c.department?.name || 'Department'}</span>
+                            <span>•</span>
+                            <span>{c.level ? `${c.level.replace(/[^0-9]/g, '')}L` : '100L'}</span>
+                            <span>•</span>
+                            <span>Semester {c.semester || 1}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2.5 border-t border-gray-100 dark:border-slate-800 pt-4">
+              <button
+                type="button"
+                onClick={() => setAssigningLecturer(null)}
+                disabled={savingAssignment}
+                className="rounded-xl border border-gray-200 dark:border-slate-800 px-4 py-2 text-xs font-semibold text-text-secondary hover:bg-surface disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCoursesAssignment}
+                disabled={savingAssignment}
+                className="rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white hover:bg-brand-navy/90 disabled:opacity-50 transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                {savingAssignment ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <BookOpen className="h-3.5 w-3.5" />
+                    Save Assigned Courses
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

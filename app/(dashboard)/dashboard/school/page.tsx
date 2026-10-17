@@ -83,6 +83,10 @@ export default function SchoolDashboardPage() {
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
+            <AppButton href="/dashboard/school/courses" variant="secondary">
+              <Plus className="h-4 w-4" />
+              Add Course
+            </AppButton>
             <AppButton href="/dashboard/school/lecturers">
               <Plus className="h-4 w-4" />
               Add Lecturer

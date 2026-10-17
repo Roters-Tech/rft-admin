@@ -51,7 +51,15 @@ export default function SchoolAnnouncementsPage() {
     try {
       const data = await adminApiRequest('/announcements');
       if (Array.isArray(data)) {
-        setAnnouncements(data);
+        // Requirement 4: Announcements created by class rep shouldn't show in the lecturer and school admin dashboard only super admin
+        const filtered = data.filter(
+          (a: any) =>
+            a.authorRole !== 'STUDENT' &&
+            a.author?.role !== 'STUDENT' &&
+            (a.audienceType || '').toUpperCase() !== 'CLASS_REP' &&
+            (a.audienceType || '').toUpperCase() !== 'REP'
+        );
+        setAnnouncements(filtered);
       }
     } catch (err: any) {
       setError(err?.message || 'Failed to fetch announcements');

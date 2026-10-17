@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState, useMemo, use } from 'react';
 import Link from 'next/link';
-import { Building2, MapPin, ShieldCheck, Users, Plus, BookOpen, ArrowLeft, RefreshCw, Upload, FileText, CheckCircle, Trash2, Layers, Power, X, CreditCard } from 'lucide-react';
+import { Building2, MapPin, ShieldCheck, Users, Plus, BookOpen, ArrowLeft, RefreshCw, Upload, FileText, CheckCircle, Trash2, Layers, Power, X, CreditCard, GraduationCap, UserCheck, Check, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { platformSchools } from '@/lib/mock-data/platform';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -11,6 +11,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { adminApiRequest } from '@/lib/apiClient';
 import { useToast } from '@/components/providers/ToastProvider';
 import { DepartmentSelector } from '@/components/ui/DepartmentSelector';
+import { SearchableSelect, SearchableOption } from '@/components/ui/SearchableSelect';
 
 export default function SchoolProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -23,6 +24,7 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
   const [departments, setDepartments] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [contents, setContents] = useState<any[]>([]);
+  const [schoolFaculties, setSchoolFaculties] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modals for adding lecturer, content, departments, and subscription tier
@@ -31,6 +33,26 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
   const [showTierModal, setShowTierModal] = useState(false);
   const [selectedTierPlan, setSelectedTierPlan] = useState('Free Plan');
+
+  // Course Modal state & fields
+  const [showCourseModal, setShowCourseModal] = useState(false);
+  const [courseCode, setCourseCode] = useState('');
+  const [courseName, setCourseName] = useState('');
+  const [courseLevel, setCourseLevel] = useState('300');
+  const [courseUnits, setCourseUnits] = useState('3');
+  const [courseSemester, setCourseSemester] = useState('1');
+  const [courseFacultyId, setCourseFacultyId] = useState('');
+  const [courseDepartmentId, setCourseDepartmentId] = useState('');
+  const [courseLecturerId, setCourseLecturerId] = useState('');
+  const [creatingCourse, setCreatingCourse] = useState(false);
+  const [deletingCourse, setDeletingCourse] = useState<any | null>(null);
+  const [isDeletingCourse, setIsDeletingCourse] = useState(false);
+
+  // Assign Lecturers to Course modal state
+  const [assigningCourse, setAssigningCourse] = useState<any | null>(null);
+  const [selectedCourseLecturerIds, setSelectedCourseLecturerIds] = useState<string[]>([]);
+  const [savingCourseLecturers, setSavingCourseLecturers] = useState(false);
+  const [courseLecturerSearch, setCourseLecturerSearch] = useState('');
 
   const [lecturerName, setLecturerName] = useState('');
   const [lecturerEmail, setLecturerEmail] = useState('');
@@ -64,12 +86,17 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
         setSchool(localMatch);
       }
 
-      const [coursesData, usersData, depsData, studentsData, contentsData] = await Promise.all([
+      const [coursesData, usersData, depsData, studentsData, contentsData, facsData] = await Promise.all([
         adminApiRequest('/admin/courses').catch(() => []),
         adminApiRequest(`/admin/users?role=LECTURER&schoolId=${id}`).catch(() => []),
         adminApiRequest(`/admin/departments/school/${id}`).catch(() => []),
         adminApiRequest(`/admin/users?role=STUDENT&schoolId=${id}`).catch(() => []),
         adminApiRequest(`/admin/content?schoolId=${id}`).catch(() => []),
+        adminApiRequest(`/admin/faculties?schoolId=${id}`).catch(() => null)
+          .then(async (res) => {
+            if (Array.isArray(res) && res.length > 0) return res;
+            return adminApiRequest(`/faculties/public?schoolId=${id}`).catch(() => []);
+          }),
       ]);
 
       if (Array.isArray(coursesData)) {
@@ -87,10 +114,203 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
       if (Array.isArray(contentsData)) {
         setContents(contentsData);
       }
+      if (Array.isArray(facsData)) {
+        setSchoolFaculties(facsData);
+      }
     } catch (err) {
       console.warn('Error fetching school details:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const facultyOptions = useMemo(() => {
+    const opts: SearchableOption[] = [{ value: '', label: 'All Faculties / General', sublabel: `${departments.length} Total Departments` }];
+    schoolFaculties.forEach((f: any) => {
+      const depCount = departments.filter((d: any) => d.facultyId === f.id || d.faculty?.id === f.id).length || f.departments?.length || 0;
+      opts.push({
+        value: f.id,
+        label: f.name,
+        category: 'Faculty',
+        sublabel: `${depCount} Departments`,
+      });
+    });
+    return opts;
+  }, [schoolFaculties, departments]);
+
+  const departmentOptions = useMemo(() => {
+    let list = departments;
+    if (courseFacultyId) {
+      const filtered = departments.filter((d: any) => d.facultyId === courseFacultyId || d.faculty?.id === courseFacultyId);
+      if (filtered.length > 0) {
+        list = filtered;
+      }
+    }
+
+    return list.map((d: any) => {
+      const facName = d.faculty?.name || schoolFaculties.find((f: any) => f.id === d.facultyId)?.name;
+      return {
+        value: d.id,
+        label: d.name,
+        category: facName || 'Department',
+      };
+    });
+  }, [courseFacultyId, departments, schoolFaculties]);
+
+  const lecturerCreationOptions: SearchableOption[] = useMemo(() => {
+    const opts: SearchableOption[] = [{ value: '', label: 'No Lecturer Assigned Yet' }];
+    lecturers.forEach((lec) => {
+      opts.push({
+        value: lec.id,
+        label: lec.fullName,
+        sublabel: lec.email,
+        category: lec.department?.name || 'Faculty',
+      });
+    });
+    return opts;
+  }, [lecturers]);
+
+  const filteredAssignLecturers = useMemo(() => {
+    if (!courseLecturerSearch.trim()) return lecturers;
+    const q = courseLecturerSearch.toLowerCase();
+    return lecturers.filter(
+      (l: any) =>
+        l.fullName?.toLowerCase().includes(q) ||
+        l.email?.toLowerCase().includes(q) ||
+        l.department?.name?.toLowerCase().includes(q)
+    );
+  }, [lecturers, courseLecturerSearch]);
+
+  const handleCourseDepartmentChange = (deptId: string) => {
+    setCourseDepartmentId(deptId);
+    const dept = departments.find((d: any) => d.id === deptId);
+    if (dept?.facultyId) {
+      setCourseFacultyId(dept.facultyId);
+    } else if (dept?.faculty?.id) {
+      setCourseFacultyId(dept.faculty.id);
+    }
+  };
+
+  const handleCourseFacultyChange = (newFacId: string) => {
+    setCourseFacultyId(newFacId);
+    if (newFacId) {
+      const matchingDepts = departments.filter((d: any) => d.facultyId === newFacId || d.faculty?.id === newFacId);
+      if (matchingDepts.length > 0 && !matchingDepts.some((d: any) => d.id === courseDepartmentId)) {
+        setCourseDepartmentId(matchingDepts[0].id);
+      }
+    }
+  };
+
+  const handleOpenCourseModal = () => {
+    setCourseCode('');
+    setCourseName('');
+    setCourseLevel('300');
+    setCourseUnits('3');
+    setCourseSemester('1');
+    setCourseFacultyId('');
+    if (departments.length > 0) {
+      setCourseDepartmentId(departments[0].id);
+      if (departments[0].facultyId || departments[0].faculty?.id) {
+        setCourseFacultyId(departments[0].facultyId || departments[0].faculty?.id);
+      }
+    } else {
+      setCourseDepartmentId('');
+    }
+    setShowCourseModal(true);
+  };
+
+  const handleCreateCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!courseCode.trim()) {
+      showToast('Please enter a course code (e.g. LAW 301)', 'error');
+      return;
+    }
+    if (!courseName.trim()) {
+      showToast('Please enter a course title (e.g. Law of Evidence I)', 'error');
+      return;
+    }
+    if (!courseDepartmentId) {
+      showToast('Please select both faculty and department for this course', 'error');
+      return;
+    }
+
+    setCreatingCourse(true);
+    try {
+      const payload = {
+        code: courseCode.trim().toUpperCase(),
+        name: courseName.trim(),
+        level: courseLevel,
+        unit: Number(courseUnits) || 3,
+        credits: Number(courseUnits) || 3,
+        semester: Number(courseSemester) || 1,
+        schoolId: id,
+        departmentId: courseDepartmentId,
+        facultyId: courseFacultyId || undefined,
+        lecturerIds: courseLecturerId ? [courseLecturerId] : undefined,
+      };
+
+      await adminApiRequest('/admin/courses', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      showToast(`Course "${courseCode.toUpperCase()}" created and linked to department successfully!`, 'success');
+      setShowCourseModal(false);
+      setCourseLecturerId('');
+      await fetchSchoolDetails();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to create course', 'error');
+    } finally {
+      setCreatingCourse(false);
+    }
+  };
+
+  const openAssignCourseLecturers = (course: any) => {
+    setAssigningCourse(course);
+    setSelectedCourseLecturerIds((course.lecturers || []).map((l: any) => l.id));
+    setCourseLecturerSearch('');
+  };
+
+  const toggleLecturerForCourse = (lecturerId: string) => {
+    setSelectedCourseLecturerIds((prev) =>
+      prev.includes(lecturerId) ? prev.filter((id) => id !== lecturerId) : [...prev, lecturerId]
+    );
+  };
+
+  const handleSaveCourseLecturers = async () => {
+    if (!assigningCourse) return;
+    setSavingCourseLecturers(true);
+    try {
+      await adminApiRequest(`/admin/courses/${assigningCourse.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          lecturerIds: selectedCourseLecturerIds,
+        }),
+      });
+      showToast(`Assigned lecturers for ${assigningCourse.code} updated!`, 'success');
+      setAssigningCourse(null);
+      await fetchSchoolDetails();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to assign lecturers', 'error');
+    } finally {
+      setSavingCourseLecturers(false);
+    }
+  };
+
+  const handleDeleteCourse = async () => {
+    if (!deletingCourse) return;
+    setIsDeletingCourse(true);
+    try {
+      await adminApiRequest(`/admin/courses/${deletingCourse.id}`, {
+        method: 'DELETE',
+      });
+      showToast(`Course "${deletingCourse.code}" deleted successfully.`, 'success');
+      setDeletingCourse(null);
+      await fetchSchoolDetails();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete course', 'error');
+    } finally {
+      setIsDeletingCourse(false);
     }
   };
 
@@ -310,6 +530,13 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
               Assign Lecturer
             </button>
             <button
+              onClick={handleOpenCourseModal}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-navy px-4 text-xs font-semibold text-white hover:bg-brand-navy-deep transition-all shadow-sm"
+            >
+              <Plus className="h-4 w-4" />
+              Add Course
+            </button>
+            <button
               onClick={() => setShowContentModal(true)}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-gold px-4 text-xs font-bold text-brand-navy hover:bg-brand-gold-light transition-all"
             >
@@ -426,7 +653,19 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* Courses & Past Questions Panel */}
-      <Panel title="Registered Courses & Past Questions" subtitle="Catalog of active modules for this campus.">
+      <Panel
+        title={`Registered Courses (${courses.length})`}
+        subtitle="Catalog of active academic modules for this campus."
+        action={
+          <button
+            onClick={handleOpenCourseModal}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand-navy px-3.5 text-xs font-semibold text-white hover:bg-brand-navy-deep transition-all shadow-sm"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add Course
+          </button>
+        }
+      >
         {courses.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -434,20 +673,69 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
                 <tr className="border-b border-gray-100 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-text-secondary">
                   <th className="py-3 px-4">Course Code</th>
                   <th className="py-3 px-4">Course Name</th>
+                  <th className="py-3 px-4">Department / Faculty</th>
+                  <th className="py-3 px-4">Assigned Lecturer(s)</th>
                   <th className="py-3 px-4">Level</th>
                   <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {courses.map((course) => (
                   <tr key={course.id} className="border-b border-gray-100 text-sm hover:bg-surface">
                     <td className="py-3 px-4 font-bold text-brand-navy">{course.code}</td>
-                    <td className="py-3 px-4 text-text-primary">{course.name}</td>
+                    <td className="py-3 px-4 font-medium text-text-primary">{course.name}</td>
+                    <td className="py-3 px-4 text-text-secondary">
+                      <span className="font-semibold text-brand-navy">
+                        {course.department?.name || 'Department Linked'}
+                      </span>
+                      {course.department?.faculty?.name ? (
+                        <span className="block text-[11px] text-text-muted">{course.department.faculty.name}</span>
+                      ) : null}
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex flex-wrap items-center gap-1.5 max-w-[200px]">
+                        {course.lecturers && course.lecturers.length > 0 ? (
+                          course.lecturers.map((l: any) => (
+                            <span
+                              key={l.id}
+                              className="inline-flex items-center gap-1 rounded-md bg-brand-navy/10 px-2 py-0.5 text-[11px] font-semibold text-brand-navy"
+                            >
+                              <UserCheck className="h-3 w-3" />
+                              {l.fullName}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-text-muted italic">Unassigned</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="py-3 px-4 text-text-secondary">{course.level || '300'}L</td>
                     <td className="py-3 px-4">
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-status-optimal">
                         <CheckCircle className="h-3.5 w-3.5" /> Active
                       </span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openAssignCourseLecturers(course)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100 transition-colors"
+                          title="Assign Lecturers to this Course"
+                        >
+                          <UserCheck className="h-3.5 w-3.5" />
+                          Assign
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingCourse(course)}
+                          className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
+                          title="Delete Course"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -458,7 +746,14 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
           <div className="py-8 text-center">
             <BookOpen className="mx-auto h-8 w-8 text-text-muted" />
             <p className="mt-2 text-sm font-bold text-text-primary">No Courses Registered for this Campus Yet</p>
-            <p className="mt-1 text-xs text-text-secondary">Courses created or assigned to this school will appear here.</p>
+            <p className="mt-1 text-xs text-text-secondary">Click below to create and link the first course to a department and faculty.</p>
+            <button
+              onClick={handleOpenCourseModal}
+              className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand-navy px-4 text-xs font-semibold text-white hover:bg-brand-navy-deep transition-all shadow-sm"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Course
+            </button>
           </div>
         )}
       </Panel>
@@ -935,6 +1230,344 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
                 className="h-10 rounded-xl bg-brand-navy px-5 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50"
               >
                 {submitting ? 'Updating...' : `Confirm ${selectedTierPlan}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 5: Add Campus Course */}
+      {showCourseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-brand-navy flex items-center gap-2">
+                  <BookOpen className="h-5 w-5 text-brand-navy" />
+                  Add Campus Course
+                </h3>
+                <p className="text-xs text-text-secondary">
+                  Create or assign official curriculum courses for {activeSchool.name}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCourseModal(false)}
+                className="text-text-muted hover:text-text-primary p-1 rounded-lg hover:bg-surface"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCourse} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <SearchableSelect
+                  label="Faculty"
+                  value={courseFacultyId}
+                  onChange={handleCourseFacultyChange}
+                  options={facultyOptions}
+                  placeholder="All Faculties / Select Faculty..."
+                  emptyText="No faculties found"
+                />
+
+                <SearchableSelect
+                  label="Department"
+                  required
+                  value={courseDepartmentId}
+                  onChange={handleCourseDepartmentChange}
+                  options={departmentOptions}
+                  placeholder="Search or select department..."
+                  emptyText="No departments found"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
+                    Course Code *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={courseCode}
+                    onChange={(e) => setCourseCode(e.target.value)}
+                    placeholder="e.g. LAW 301"
+                    className="w-full h-11 rounded-xl border border-gray-200 bg-surface px-3 text-xs text-text-primary outline-none focus:border-brand-navy focus:bg-white placeholder:text-text-muted font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
+                    Level *
+                  </label>
+                  <select
+                    value={courseLevel}
+                    onChange={(e) => setCourseLevel(e.target.value)}
+                    className="w-full h-11 rounded-xl border border-gray-200 bg-surface px-3 text-xs font-bold text-brand-navy outline-none focus:border-brand-navy focus:bg-white"
+                  >
+                    <option value="100">100 Level (100L)</option>
+                    <option value="200">200 Level (200L)</option>
+                    <option value="300">300 Level (300L)</option>
+                    <option value="400">400 Level (400L)</option>
+                    <option value="500">500 Level (500L)</option>
+                    <option value="600">600 Level (600L)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
+                  Course Title / Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={courseName}
+                  onChange={(e) => setCourseName(e.target.value)}
+                  placeholder="e.g. Law of Evidence I"
+                  className="w-full h-11 rounded-xl border border-gray-200 bg-surface px-3 text-xs text-text-primary outline-none focus:border-brand-navy focus:bg-white placeholder:text-text-muted font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
+                    Credit Units *
+                  </label>
+                  <select
+                    value={courseUnits}
+                    onChange={(e) => setCourseUnits(e.target.value)}
+                    className="w-full h-11 rounded-xl border border-gray-200 bg-surface px-3 text-xs font-semibold text-text-primary outline-none focus:border-brand-navy focus:bg-white"
+                  >
+                    <option value="1">1 Unit</option>
+                    <option value="2">2 Units</option>
+                    <option value="3">3 Units</option>
+                    <option value="4">4 Units</option>
+                    <option value="5">5 Units</option>
+                    <option value="6">6 Units</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
+                    Semester
+                  </label>
+                  <select
+                    value={courseSemester}
+                    onChange={(e) => setCourseSemester(e.target.value)}
+                    className="w-full h-11 rounded-xl border border-gray-200 bg-surface px-3 text-xs font-semibold text-text-primary outline-none focus:border-brand-navy focus:bg-white"
+                  >
+                    <option value="1">1st Semester</option>
+                    <option value="2">2nd Semester</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <SearchableSelect
+                  label="Assign Lecturer (Optional)"
+                  options={lecturerCreationOptions}
+                  value={courseLecturerId}
+                  onChange={setCourseLecturerId}
+                  placeholder="Search and select lecturer by name, email, or department..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowCourseModal(false)}
+                  className="rounded-xl px-4 py-2 text-xs font-semibold text-text-secondary hover:bg-surface"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingCourse}
+                  className="rounded-xl bg-brand-navy px-5 py-2.5 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 transition-all shadow-sm"
+                >
+                  {creatingCourse ? 'Creating...' : 'Create & Add Course'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Course Confirmation Modal */}
+      {deletingCourse && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100">
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-red-600">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-bold text-brand-navy">Delete Course</h3>
+                <p className="mt-1 text-xs text-text-secondary leading-relaxed">
+                  Are you sure you want to delete <span className="font-bold text-brand-navy">{deletingCourse.code}</span> ({deletingCourse.name})?
+                </p>
+                <div className="mt-3 rounded-xl bg-surface p-3 text-xs text-text-secondary space-y-1.5">
+                  <div className="flex justify-between">
+                    <span>Department:</span>
+                    <span className="font-semibold text-brand-navy">{deletingCourse.department?.name || 'Department Linked'}</span>
+                  </div>
+                  {deletingCourse.department?.faculty?.name && (
+                    <div className="flex justify-between">
+                      <span>Faculty:</span>
+                      <span className="font-medium text-text-primary">{deletingCourse.department.faculty.name}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span>Level:</span>
+                    <span className="font-medium text-text-primary">{deletingCourse.level || '300'}L</span>
+                  </div>
+                </div>
+                <p className="mt-2.5 text-[11px] text-red-500 font-medium">
+                  This will remove the course curriculum, enrollments, and associated records for this campus.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeletingCourse(null)}
+                disabled={isDeletingCourse}
+                className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-text-secondary hover:bg-surface disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteCourse}
+                disabled={isDeletingCourse}
+                className="rounded-xl bg-red-600 px-5 py-2 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50 transition-all shadow-sm flex items-center gap-1.5"
+              >
+                {isDeletingCourse ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Confirm Delete
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Assign Lecturers to Course Modal */}
+      {assigningCourse && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-navy text-white">
+                  <UserCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-brand-navy">Assign Course Lecturers</h3>
+                  <p className="text-xs text-text-secondary">{assigningCourse.code} • {assigningCourse.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssigningCourse(null)}
+                className="rounded-xl p-1 text-gray-400 hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-text-secondary leading-relaxed">
+              Select which lecturers from <strong className="text-brand-navy">{school?.name}</strong> teach this course. Once assigned, this course will appear in their lecturer dashboard automatically.
+            </p>
+
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search lecturers by name, email, or department..."
+                  value={courseLecturerSearch}
+                  onChange={(e) => setCourseLecturerSearch(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-surface py-2 pl-9 pr-3 text-xs outline-none focus:border-brand-navy"
+                />
+              </div>
+              <span className="text-xs font-bold text-brand-navy whitespace-nowrap">
+                {selectedCourseLecturerIds.length} Selected
+              </span>
+            </div>
+
+            <div className="mt-3 flex-1 overflow-y-auto max-h-60 rounded-2xl border border-gray-200 p-2 space-y-1 divide-y divide-gray-100">
+              {lecturers.length === 0 ? (
+                <div className="py-6 text-center text-xs text-text-muted">
+                  No verified lecturers registered for this campus yet.
+                </div>
+              ) : filteredAssignLecturers.length === 0 ? (
+                <div className="py-6 text-center text-xs text-text-muted">
+                  No lecturers match your search criteria.
+                </div>
+              ) : (
+                filteredAssignLecturers.map((lec: any) => {
+                  const isChecked = selectedCourseLecturerIds.includes(lec.id);
+                  return (
+                    <div
+                      key={lec.id}
+                      onClick={() => toggleLecturerForCourse(lec.id)}
+                      className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition ${
+                        isChecked ? 'bg-sky-50 border border-sky-200' : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={`h-5 w-5 rounded-lg border flex items-center justify-center transition ${
+                            isChecked ? 'bg-brand-navy border-brand-navy text-white' : 'border-gray-300 bg-white'
+                          }`}
+                        >
+                          {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-brand-navy">{lec.fullName}</p>
+                          <p className="text-[11px] text-text-muted">{lec.email} {lec.department?.name ? `• ${lec.department.name}` : ''}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2.5 border-t border-gray-100 pt-3">
+              <button
+                type="button"
+                onClick={() => setAssigningCourse(null)}
+                disabled={savingCourseLecturers}
+                className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-text-secondary hover:bg-surface disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCourseLecturers}
+                disabled={savingCourseLecturers}
+                className="rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                {savingCourseLecturers ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="h-3.5 w-3.5" />
+                    Save Assignments
+                  </>
+                )}
               </button>
             </div>
           </div>

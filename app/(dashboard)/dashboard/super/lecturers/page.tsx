@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { ShieldCheck, UserCog, RefreshCw, Plus, X, Mail, CheckCircle2, Search, Power, Edit2, BookOpen } from 'lucide-react';
 import { AppButton } from '@/components/ui/AppButton';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -28,14 +28,38 @@ export default function SuperLecturersPage() {
   const [schoolId, setSchoolId] = useState('');
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [modalCourseSearch, setModalCourseSearch] = useState('');
 
   // Form states (Edit)
   const [editFullName, setEditFullName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editSchoolId, setEditSchoolId] = useState('');
   const [editCourseIds, setEditCourseIds] = useState<string[]>([]);
+  const [editCourseSearch, setEditCourseSearch] = useState('');
 
   const { showToast } = useToast();
+
+  const filteredModalCourses = useMemo(() => {
+    if (!modalCourseSearch.trim()) return courses;
+    const q = modalCourseSearch.toLowerCase();
+    return courses.filter(
+      (c: any) =>
+        c.code?.toLowerCase().includes(q) ||
+        (c.name || c.title)?.toLowerCase().includes(q) ||
+        c.department?.name?.toLowerCase().includes(q)
+    );
+  }, [courses, modalCourseSearch]);
+
+  const filteredEditCourses = useMemo(() => {
+    if (!editCourseSearch.trim()) return courses;
+    const q = editCourseSearch.toLowerCase();
+    return courses.filter(
+      (c: any) =>
+        c.code?.toLowerCase().includes(q) ||
+        (c.name || c.title)?.toLowerCase().includes(q) ||
+        c.department?.name?.toLowerCase().includes(q)
+    );
+  }, [courses, editCourseSearch]);
 
   const fetchLecturers = async () => {
     setLoading(true);
@@ -59,7 +83,7 @@ export default function SuperLecturersPage() {
     try {
       const [schoolsData, coursesData] = await Promise.all([
         adminApiRequest('/schools/public').catch(() => []),
-        adminApiRequest('/courses').catch(() => []),
+        adminApiRequest('/admin/courses').catch(() => adminApiRequest('/courses')).catch(() => []),
       ]);
       if (Array.isArray(schoolsData)) setSchools(schoolsData);
       if (Array.isArray(coursesData)) setCourses(coursesData);
@@ -131,6 +155,7 @@ export default function SuperLecturersPage() {
     setEditEmail(lecturer.email || '');
     setEditSchoolId(lecturer.school?.id || '');
     setEditCourseIds(lecturer.taughtCourses?.map((c: any) => c.id) || []);
+    setEditCourseSearch('');
     setShowEditModal(true);
   };
 
@@ -396,24 +421,45 @@ export default function SuperLecturersPage() {
 
                 {/* Course Selection Checkboxes */}
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                    Assign Teaching Courses
-                  </label>
-                  <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 p-3 space-y-2 bg-surface">
-                    {courses.length > 0 ? (
-                      courses.map((c) => (
-                        <label key={c.id} className="flex items-center gap-2 text-xs font-medium text-text-primary cursor-pointer">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary">
+                      Assign Teaching Courses
+                    </label>
+                    <span className="text-xs font-bold text-brand-navy">
+                      {selectedCourseIds.length} Selected
+                    </span>
+                  </div>
+
+                  <div className="relative mb-2">
+                    <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search courses by code, title, or department..."
+                      value={modalCourseSearch}
+                      onChange={(e) => setModalCourseSearch(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 bg-surface py-2 pl-8 pr-3 text-xs outline-none focus:border-brand-navy"
+                    />
+                  </div>
+
+                  <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 p-2 space-y-1 bg-surface">
+                    {courses.length === 0 ? (
+                      <p className="text-xs text-text-muted p-2">No platform courses created yet.</p>
+                    ) : filteredModalCourses.length === 0 ? (
+                      <p className="text-xs text-text-muted p-2">No courses match search.</p>
+                    ) : (
+                      filteredModalCourses.map((c) => (
+                        <label key={c.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white text-xs font-medium text-text-primary cursor-pointer transition">
                           <input
                             type="checkbox"
                             checked={selectedCourseIds.includes(c.id)}
                             onChange={() => toggleCourseSelection(c.id, false)}
                             className="rounded border-gray-300 text-brand-navy focus:ring-brand-navy"
                           />
-                          <span>{c.code}: {c.name || c.title}</span>
+                          <span className="font-bold text-brand-navy">{c.code}:</span>
+                          <span className="truncate">{c.name || c.title}</span>
+                          {c.department?.name && <span className="text-[10px] text-text-muted">({c.department.name})</span>}
                         </label>
                       ))
-                    ) : (
-                      <p className="text-xs text-text-muted">No platform courses created yet.</p>
                     )}
                   </div>
                 </div>
@@ -504,21 +550,46 @@ export default function SuperLecturersPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                  Assigned Teaching Courses
-                </label>
-                <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 p-3 space-y-2 bg-surface">
-                  {courses.map((c) => (
-                    <label key={c.id} className="flex items-center gap-2 text-xs font-medium text-text-primary cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editCourseIds.includes(c.id)}
-                        onChange={() => toggleCourseSelection(c.id, true)}
-                        className="rounded border-gray-300 text-brand-navy focus:ring-brand-navy"
-                      />
-                      <span>{c.code}: {c.name || c.title}</span>
-                    </label>
-                  ))}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary">
+                    Assigned Teaching Courses
+                  </label>
+                  <span className="text-xs font-bold text-brand-navy">
+                    {editCourseIds.length} Selected
+                  </span>
+                </div>
+
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search courses by code, title, or department..."
+                    value={editCourseSearch}
+                    onChange={(e) => setEditCourseSearch(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 bg-surface py-2 pl-8 pr-3 text-xs outline-none focus:border-brand-navy"
+                  />
+                </div>
+
+                <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 p-2 space-y-1 bg-surface">
+                  {courses.length === 0 ? (
+                    <p className="text-xs text-text-muted p-2">No platform courses created yet.</p>
+                  ) : filteredEditCourses.length === 0 ? (
+                    <p className="text-xs text-text-muted p-2">No courses match search.</p>
+                  ) : (
+                    filteredEditCourses.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white text-xs font-medium text-text-primary cursor-pointer transition">
+                        <input
+                          type="checkbox"
+                          checked={editCourseIds.includes(c.id)}
+                          onChange={() => toggleCourseSelection(c.id, true)}
+                          className="rounded border-gray-300 text-brand-navy focus:ring-brand-navy"
+                        />
+                        <span className="font-bold text-brand-navy">{c.code}:</span>
+                        <span className="truncate">{c.name || c.title}</span>
+                        {c.department?.name && <span className="text-[10px] text-text-muted">({c.department.name})</span>}
+                      </label>
+                    ))
+                  )}
                 </div>
               </div>
 

@@ -13,6 +13,9 @@ interface Announcement {
   type?: string;
   imageUrl?: string | null;
   audienceType?: string;
+  level?: string | null;
+  departmentId?: string | null;
+  department?: { id: string; name: string };
   courseId?: string | null;
   course?: { code: string; name: string };
   createdAt: string;
@@ -36,6 +39,7 @@ export default function LecturerAnnouncementsPage() {
   const [message, setMessage] = useState('');
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [type, setType] = useState('NEWS');
+  const [level, setLevel] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -45,6 +49,7 @@ export default function LecturerAnnouncementsPage() {
   const [editMessage, setEditMessage] = useState('');
   const [editSelectedCourseId, setEditSelectedCourseId] = useState('');
   const [editType, setEditType] = useState('NEWS');
+  const [editLevel, setEditLevel] = useState('');
   const [editImageFile, setEditImageFile] = useState<File | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
 
@@ -64,7 +69,15 @@ export default function LecturerAnnouncementsPage() {
       ]);
 
       if (Array.isArray(annsData)) {
-        setAnnouncements(annsData);
+        // Requirement 4: Announcements created by class rep shouldn't show in the lecturer and school admin dashboard
+        const filtered = annsData.filter(
+          (a: any) =>
+            a.authorRole !== 'STUDENT' &&
+            a.author?.role !== 'STUDENT' &&
+            (a.audienceType || '').toUpperCase() !== 'CLASS_REP' &&
+            (a.audienceType || '').toUpperCase() !== 'REP'
+        );
+        setAnnouncements(filtered);
       }
       if (Array.isArray(coursesData)) {
         setCourses(coursesData);
@@ -90,8 +103,14 @@ export default function LecturerAnnouncementsPage() {
       const formData = new FormData();
       formData.append('title', title.trim());
       formData.append('message', message.trim());
-      formData.append('audienceType', 'COURSE');
+      formData.append('audienceType', type === 'LECTURER_UPDATE' ? 'DEPARTMENT_LEVEL' : (selectedCourseId ? 'COURSE' : 'ALL'));
       formData.append('type', type);
+      if (level && level.trim() !== '') {
+        formData.append('level', level.trim());
+      }
+      if (user?.departmentId) {
+        formData.append('departmentId', user.departmentId);
+      }
       if (selectedCourseId) {
         formData.append('courseId', selectedCourseId);
       }
@@ -104,11 +123,12 @@ export default function LecturerAnnouncementsPage() {
         body: formData,
       });
 
-      setSuccess('Announcement broadcasted to enrolled students!');
+      setSuccess('Announcement broadcasted successfully!');
       setTitle('');
       setMessage('');
       setSelectedCourseId('');
       setType('NEWS');
+      setLevel('');
       setImageFile(null);
       setIsModalOpen(false);
       fetchAnnouncementsAndCourses();
@@ -125,6 +145,7 @@ export default function LecturerAnnouncementsPage() {
     setEditMessage(ann.message || '');
     setEditSelectedCourseId(ann.courseId || '');
     setEditType(ann.type || 'NEWS');
+    setEditLevel(ann.level || '');
     setEditImageFile(null);
   };
 
@@ -139,6 +160,9 @@ export default function LecturerAnnouncementsPage() {
       formData.append('title', editTitle.trim());
       formData.append('message', editMessage.trim());
       formData.append('type', editType);
+      if (editLevel !== undefined) {
+        formData.append('level', editLevel.trim());
+      }
       formData.append('courseId', editSelectedCourseId || '');
       if (editImageFile) {
         formData.append('image', editImageFile);
@@ -294,7 +318,12 @@ export default function LecturerAnnouncementsPage() {
                     </span>
                     {ann.type && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-700">
-                        {ann.type}
+                        {ann.type === 'LECTURER_UPDATE' ? 'Lecturer Update' : ann.type}
+                      </span>
+                    )}
+                    {ann.level && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-700 border border-blue-200">
+                        {ann.level} Level
                       </span>
                     )}
                     {ann.course && (
@@ -459,9 +488,35 @@ export default function LecturerAnnouncementsPage() {
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
                 >
                   <option value="NEWS">Campus News / General</option>
+                  <option value="LECTURER_UPDATE">Lecturer Update</option>
                   <option value="MATERIAL">Course Material Update</option>
                   <option value="EXAM">Exam / Timetable Update</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                  Target Student Level {type === 'LECTURER_UPDATE' ? '*' : '(Optional)'}
+                </label>
+                <select
+                  value={level}
+                  onChange={(e) => setLevel(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
+                >
+                  <option value="">All Levels (Department-wide)</option>
+                  <option value="100">100 Level</option>
+                  <option value="200">200 Level</option>
+                  <option value="300">300 Level</option>
+                  <option value="400">400 Level</option>
+                  <option value="500">500 Level</option>
+                  <option value="600">600 Level</option>
+                  <option value="700">700 Level</option>
+                </select>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  {type === 'LECTURER_UPDATE'
+                    ? 'Only students in your department and the selected level will receive this lecturer update.'
+                    : 'Optionally target students at a specific level in your department.'}
+                </p>
               </div>
 
               <div>
@@ -573,8 +628,29 @@ export default function LecturerAnnouncementsPage() {
                   className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
                 >
                   <option value="NEWS">Campus News / General</option>
+                  <option value="LECTURER_UPDATE">Lecturer Update</option>
                   <option value="MATERIAL">Course Material Update</option>
                   <option value="EXAM">Exam / Timetable Update</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                  Target Student Level (Optional)
+                </label>
+                <select
+                  value={editLevel}
+                  onChange={(e) => setEditLevel(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs outline-none focus:border-brand-primary bg-white"
+                >
+                  <option value="">All Levels (Department-wide)</option>
+                  <option value="100">100 Level</option>
+                  <option value="200">200 Level</option>
+                  <option value="300">300 Level</option>
+                  <option value="400">400 Level</option>
+                  <option value="500">500 Level</option>
+                  <option value="600">600 Level</option>
+                  <option value="700">700 Level</option>
                 </select>
               </div>
 
