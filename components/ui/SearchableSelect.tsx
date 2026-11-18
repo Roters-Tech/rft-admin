@@ -20,6 +20,7 @@ interface SearchableSelectProps {
   emptyText?: string;
   disabled?: boolean;
   className?: string;
+  size?: 'sm' | 'md';
 }
 
 export function SearchableSelect({
@@ -32,6 +33,7 @@ export function SearchableSelect({
   emptyText = 'No matching options found',
   disabled = false,
   className = '',
+  size = 'md',
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,21 +59,23 @@ export function SearchableSelect({
     );
   }, [options, searchQuery]);
 
-  // Focus search input when dropdown opens
-  useEffect(() => {
-    if (isOpen) {
-      setSearchQuery('');
-      setHighlightedIndex(0);
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 50);
-    }
-  }, [isOpen]);
+  const handleToggleOpen = () => {
+    if (disabled) return;
+    setIsOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setSearchQuery('');
+        setHighlightedIndex(0);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
+      return next;
+    });
+  };
 
-  // Reset highlight index when filtered list changes
-  useEffect(() => {
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
     setHighlightedIndex(0);
-  }, [filteredOptions]);
+  };
 
   // Click outside to close
   useEffect(() => {
@@ -118,8 +122,8 @@ export function SearchableSelect({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setIsOpen((prev) => !prev)}
-        className={`w-full h-11 flex items-center justify-between rounded-xl border bg-surface px-3.5 text-xs text-left transition-all ${
+        onClick={handleToggleOpen}
+        className={`w-full ${size === 'sm' ? 'h-9 px-3 text-xs' : 'h-11 px-3.5 text-xs'} flex items-center justify-between rounded-xl border bg-surface text-left transition-all ${
           isOpen
             ? 'border-brand-navy ring-2 ring-brand-navy/10 bg-white'
             : 'border-gray-200 hover:border-gray-300'
@@ -157,7 +161,7 @@ export function SearchableSelect({
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={handleSearchChange}
                 onKeyDown={handleKeyDown}
                 placeholder="Type to filter..."
                 className="w-full h-9 pl-9 pr-8 rounded-lg border border-gray-200 bg-white text-xs text-text-primary outline-none focus:border-brand-navy placeholder:text-gray-400 font-medium"
@@ -165,7 +169,10 @@ export function SearchableSelect({
               {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setHighlightedIndex(0);
+                  }}
                   className="absolute right-2.5 p-0.5 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                 >
                   <X className="h-3 w-3" />

@@ -86,7 +86,9 @@ export default function SuperCoursesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSchoolFilter, setSelectedSchoolFilter] = useState('all');
   const [selectedFacultyFilter, setSelectedFacultyFilter] = useState('all');
+  const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState('all');
   const [selectedLevelFilter, setSelectedLevelFilter] = useState('all');
+  const [registeredDepartments, setRegisteredDepartments] = useState<any[]>([]);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -120,9 +122,10 @@ export default function SuperCoursesPage() {
     setError('');
     try {
       clearAdminApiCache();
-      const [coursesData, schoolsData] = await Promise.all([
+      const [coursesData, schoolsData, departmentsData] = await Promise.all([
         adminApiRequest('/admin/courses').catch(() => []),
         adminApiRequest('/admin/schools').catch(() => []),
+        adminApiRequest('/admin/departments').catch(() => []),
       ]);
 
       if (Array.isArray(coursesData)) {
@@ -130,6 +133,9 @@ export default function SuperCoursesPage() {
       }
       if (Array.isArray(schoolsData)) {
         setSchools(schoolsData);
+      }
+      if (Array.isArray(departmentsData)) {
+        setRegisteredDepartments(departmentsData);
       }
     } catch (err: any) {
       setError(err?.message || 'Failed to load courses');
@@ -395,20 +401,72 @@ export default function SuperCoursesPage() {
     }
   };
 
+  // Department filter options (combining departments from API and current courses)
+  const filterDepartmentOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+
+    registeredDepartments.forEach((d: any) => {
+      if (
+        selectedSchoolFilter === 'all' ||
+        d.schoolId === selectedSchoolFilter ||
+        d.faculty?.schoolId === selectedSchoolFilter
+      ) {
+        map.set(d.id, { id: d.id, name: d.name });
+      }
+    });
+
+    courses.forEach((c) => {
+      if (c.department?.id && c.department?.name) {
+        if (
+          selectedSchoolFilter === 'all' ||
+          c.schoolId === selectedSchoolFilter ||
+          c.school?.id === selectedSchoolFilter
+        ) {
+          map.set(c.department.id, { id: c.department.id, name: c.department.name });
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [registeredDepartments, courses, selectedSchoolFilter]);
+
+  const departmentFilterSearchableOptions: SearchableOption[] = useMemo(() => {
+    const opts: SearchableOption[] = [
+      { value: 'all', label: `All Departments (${filterDepartmentOptions.length})` },
+    ];
+    filterDepartmentOptions.forEach((d) => {
+      opts.push({
+        value: d.id,
+        label: d.name,
+        category: 'Department',
+      });
+    });
+    return opts;
+  }, [filterDepartmentOptions]);
+
   // Filtered courses
   const filteredCourses = useMemo(() => {
     return courses.filter((c) => {
+      const q = searchTerm.trim().toLowerCase();
       const matchesSearch =
-        c.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c.school?.name && c.school.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (c.department?.name && c.department.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (c.department?.faculty?.name && c.department.faculty.name.toLowerCase().includes(searchTerm.toLowerCase()));
+        !q ||
+        c.code.toLowerCase().includes(q) ||
+        c.name.toLowerCase().includes(q) ||
+        (c.school?.name && c.school.name.toLowerCase().includes(q)) ||
+        (c.department?.name && c.department.name.toLowerCase().includes(q)) ||
+        (c.department?.faculty?.name && c.department.faculty.name.toLowerCase().includes(q)) ||
+        (c.level && c.level.toLowerCase().includes(q));
 
       const matchesSchool =
         selectedSchoolFilter === 'all' ||
         c.schoolId === selectedSchoolFilter ||
         c.school?.id === selectedSchoolFilter;
+
+      const matchesDepartment =
+        selectedDepartmentFilter === 'all' ||
+        c.departmentId === selectedDepartmentFilter ||
+        c.department?.id === selectedDepartmentFilter ||
+        c.department?.name === selectedDepartmentFilter;
 
       const matchesFaculty =
         selectedFacultyFilter === 'all' ||
@@ -418,9 +476,9 @@ export default function SuperCoursesPage() {
         selectedLevelFilter === 'all' ||
         (c.level && c.level.replace(/[^0-9]/g, '') === selectedLevelFilter);
 
-      return matchesSearch && matchesSchool && matchesFaculty && matchesLevel;
+      return matchesSearch && matchesSchool && matchesDepartment && matchesFaculty && matchesLevel;
     });
-  }, [courses, searchTerm, selectedSchoolFilter, selectedFacultyFilter, selectedLevelFilter]);
+  }, [courses, searchTerm, selectedSchoolFilter, selectedDepartmentFilter, selectedFacultyFilter, selectedLevelFilter]);
 
   // Aggregate stats
   const totalCourses = courses.length;
@@ -538,7 +596,10 @@ export default function SuperCoursesPage() {
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={selectedSchoolFilter}
-              onChange={(e) => setSelectedSchoolFilter(e.target.value)}
+              onChange={(e) => {
+                setSelectedSchoolFilter(e.target.value);
+                setSelectedDepartmentFilter('all');
+              }}
               className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-text-secondary outline-none focus:border-brand-primary"
             >
               <option value="all">All Institutions</option>
@@ -548,6 +609,17 @@ export default function SuperCoursesPage() {
                 </option>
               ))}
             </select>
+
+            {/* Searchable Department Dropdown */}
+            <div className="w-56">
+              <SearchableSelect
+                size="sm"
+                value={selectedDepartmentFilter}
+                onChange={(val) => setSelectedDepartmentFilter(val || 'all')}
+                options={departmentFilterSearchableOptions}
+                placeholder="Search department..."
+              />
+            </div>
 
             <select
               value={selectedLevelFilter}
@@ -563,6 +635,22 @@ export default function SuperCoursesPage() {
               <option value="600">600 Level</option>
               <option value="700">700 Level</option>
             </select>
+
+            {(selectedSchoolFilter !== 'all' || selectedDepartmentFilter !== 'all' || selectedLevelFilter !== 'all' || searchTerm) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedSchoolFilter('all');
+                  setSelectedDepartmentFilter('all');
+                  setSelectedLevelFilter('all');
+                  setSearchTerm('');
+                }}
+                className="rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 transition-colors"
+                title="Reset all filters"
+              >
+                Reset
+              </button>
+            )}
           </div>
         </div>
 
@@ -586,7 +674,7 @@ export default function SuperCoursesPage() {
             <tbody className="divide-y divide-gray-100 bg-white">
               {filteredCourses.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-text-secondary">
+                  <td colSpan={10} className="py-12 text-center text-text-secondary">
                     <BookOpen className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                     <p className="font-semibold text-text-primary">No courses found</p>
                     <p className="text-xs text-gray-400 mt-1">

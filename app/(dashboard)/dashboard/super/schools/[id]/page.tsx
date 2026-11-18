@@ -2,16 +2,45 @@
 
 import { useEffect, useState, useMemo, use } from 'react';
 import Link from 'next/link';
-import { Building2, MapPin, ShieldCheck, Users, Plus, BookOpen, ArrowLeft, RefreshCw, Upload, FileText, CheckCircle, Trash2, Layers, Power, X, CreditCard, GraduationCap, UserCheck, Check, Search } from 'lucide-react';
+import {
+  Building2,
+  MapPin,
+  ShieldCheck,
+  Users,
+  Plus,
+  BookOpen,
+  ArrowLeft,
+  RefreshCw,
+  Upload,
+  FileText,
+  CheckCircle,
+  Trash2,
+  Layers,
+  Power,
+  X,
+  CreditCard,
+  GraduationCap,
+  UserCheck,
+  Check,
+  Search,
+  Download,
+  Edit,
+  CloudDownload,
+  Sparkles,
+  Loader2,
+  Link2,
+  AlertCircle,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { platformSchools } from '@/lib/mock-data/platform';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Panel } from '@/components/ui/Panel';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { adminApiRequest } from '@/lib/apiClient';
+import { adminApiRequest, API_BASE_URL, getAdminToken } from '@/lib/apiClient';
 import { useToast } from '@/components/providers/ToastProvider';
 import { DepartmentSelector } from '@/components/ui/DepartmentSelector';
 import { SearchableSelect, SearchableOption } from '@/components/ui/SearchableSelect';
+import { compressUploadFile, formatBytes, CompressionResult } from '@/lib/pdfCompressor';
 
 export default function SchoolProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -54,6 +83,36 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
   const [savingCourseLecturers, setSavingCourseLecturers] = useState(false);
   const [courseLecturerSearch, setCourseLecturerSearch] = useState('');
 
+  // Registered Courses Filters & Search
+  const [courseSearch, setCourseSearch] = useState('');
+  const [courseDepartmentFilter, setCourseDepartmentFilter] = useState('all');
+  const [courseLevelFilter, setCourseLevelFilter] = useState('all');
+
+  // Content / Past Questions Search & Filter
+  const [contentSearch, setContentSearch] = useState('');
+  const [contentTypeFilter, setContentTypeFilter] = useState<'all' | 'past_question' | 'resource' | 'slides'>('all');
+
+  // Edit Past Question / Resource Modal state
+  const [showEditContentModal, setShowEditContentModal] = useState(false);
+  const [editingContentItem, setEditingContentItem] = useState<any | null>(null);
+  const [editContentTitle, setEditContentTitle] = useState('');
+  const [editContentType, setEditContentType] = useState<'past_question' | 'resource' | 'slides'>('past_question');
+  const [editContentCourseId, setEditContentCourseId] = useState('');
+  const [editContentLevel, setEditContentLevel] = useState('');
+  const [editContentIsPaid, setEditContentIsPaid] = useState<boolean>(true);
+  const [editContentPrice, setEditContentPrice] = useState<number>(0);
+  const [editContentFile, setEditContentFile] = useState<File | null>(null);
+  const [editContentFileStats, setEditContentFileStats] = useState<CompressionResult | null>(null);
+  const [editContentFileCompressing, setEditContentFileCompressing] = useState(false);
+  const [editContentDriveUrl, setEditContentDriveUrl] = useState('');
+  const [editContentFetchingDrive, setEditContentFetchingDrive] = useState(false);
+  const [editContentReplaceMode, setEditContentReplaceMode] = useState<'keep' | 'local' | 'drive'>('keep');
+  const [editContentSubmitting, setEditContentSubmitting] = useState(false);
+
+  // Delete Content Modal state
+  const [deleteContentConfirmItem, setDeleteContentConfirmItem] = useState<any | null>(null);
+  const [deletingContentId, setDeletingContentId] = useState<string | null>(null);
+
   const [lecturerName, setLecturerName] = useState('');
   const [lecturerEmail, setLecturerEmail] = useState('');
   const [contentTitle, setContentTitle] = useState('');
@@ -65,6 +124,13 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
   const [price, setPrice] = useState(500);
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Bulk Upload Modal enhancements (Drive + PDF Compression)
+  const [contentUploadMode, setContentUploadMode] = useState<'local' | 'drive'>('local');
+  const [contentDriveUrl, setContentDriveUrl] = useState('');
+  const [contentFetchingDrive, setContentFetchingDrive] = useState(false);
+  const [contentCompressingFile, setContentCompressingFile] = useState(false);
+  const [fileCompressionStats, setFileCompressionStats] = useState<Record<string, CompressionResult>>({});
 
   const fetchSchoolDetails = async () => {
     setLoading(true);
@@ -156,6 +222,77 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
       };
     });
   }, [courseFacultyId, departments, schoolFaculties]);
+
+  // Registered Courses filter options & filtered list
+  const availableCourseDepartments = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    departments.forEach((d: any) => {
+      if (d.id && d.name) {
+        map.set(d.id, { id: d.id, name: d.name });
+      }
+    });
+    courses.forEach((c: any) => {
+      if (c.department?.id && c.department?.name) {
+        map.set(c.department.id, { id: c.department.id, name: c.department.name });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [departments, courses]);
+
+  const departmentSearchableOptions: SearchableOption[] = useMemo(() => {
+    const opts: SearchableOption[] = [
+      { value: 'all', label: `All Departments (${availableCourseDepartments.length})` },
+    ];
+    availableCourseDepartments.forEach((d) => {
+      opts.push({
+        value: d.id,
+        label: d.name,
+        category: 'Department',
+      });
+    });
+    return opts;
+  }, [availableCourseDepartments]);
+
+  const filteredRegisteredCourses = useMemo(() => {
+    return courses.filter((course: any) => {
+      const q = courseSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        course.code?.toLowerCase().includes(q) ||
+        course.name?.toLowerCase().includes(q) ||
+        course.department?.name?.toLowerCase().includes(q) ||
+        course.department?.faculty?.name?.toLowerCase().includes(q) ||
+        course.lecturers?.some((l: any) => l.fullName?.toLowerCase().includes(q));
+
+      const matchesDept =
+        courseDepartmentFilter === 'all' ||
+        course.departmentId === courseDepartmentFilter ||
+        course.department?.id === courseDepartmentFilter ||
+        course.department?.name === courseDepartmentFilter;
+
+      const courseLevelStr = course.level ? String(course.level).replace(/[^0-9]/g, '') : '';
+      const matchesLevel =
+        courseLevelFilter === 'all' || courseLevelStr === courseLevelFilter;
+
+      return matchesSearch && matchesDept && matchesLevel;
+    });
+  }, [courses, courseSearch, courseDepartmentFilter, courseLevelFilter]);
+
+  const filteredContents = useMemo(() => {
+    return contents.filter((item) => {
+      const q = contentSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        item.title?.toLowerCase().includes(q) ||
+        item.course?.code?.toLowerCase().includes(q) ||
+        item.course?.name?.toLowerCase().includes(q);
+
+      const matchesType =
+        contentTypeFilter === 'all' || item.type === contentTypeFilter;
+
+      return matchesSearch && matchesType;
+    });
+  }, [contents, contentSearch, contentTypeFilter]);
 
   const lecturerCreationOptions: SearchableOption[] = useMemo(() => {
     const opts: SearchableOption[] = [{ value: '', label: 'No Lecturer Assigned Yet' }];
@@ -337,10 +474,9 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
 
     if (
       !confirm(
-        `Are you sure you want to ${actionText} "${school?.name || 'this institution'}"? ${
-          !isDeactivated
-            ? 'Users of this campus will be blocked from logging in.'
-            : 'Users will be able to access the system again.'
+        `Are you sure you want to ${actionText} "${school?.name || 'this institution'}"? ${!isDeactivated
+          ? 'Users of this campus will be blocked from logging in.'
+          : 'Users will be able to access the system again.'
         }`
       )
     ) {
@@ -421,6 +557,92 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
     }
   };
 
+  const handleUploadFilesSelect = async (filesToAdd: File[]) => {
+    if (!filesToAdd || filesToAdd.length === 0) return;
+    setContentCompressingFile(true);
+    try {
+      const compressedList: File[] = [];
+      for (const file of filesToAdd) {
+        const compResult = await compressUploadFile(file);
+        compressedList.push(compResult.file);
+        setFileCompressionStats((prev) => ({
+          ...prev,
+          [compResult.file.name]: compResult,
+        }));
+        if (compResult.isCompressed) {
+          showToast(
+            `Compressed "${file.name}" from ${formatBytes(compResult.originalSize)} to ${formatBytes(compResult.compressedSize)} (-${compResult.ratio}%)`,
+            'success',
+          );
+        }
+      }
+      setSelectedFiles((prev) => [...prev, ...compressedList]);
+      if (filesToAdd.length === 1 && selectedFiles.length === 0 && !contentTitle) {
+        const nameWithoutExt = filesToAdd[0].name.substring(0, filesToAdd[0].name.lastIndexOf('.')) || filesToAdd[0].name;
+        setContentTitle(nameWithoutExt);
+      }
+    } finally {
+      setContentCompressingFile(false);
+    }
+  };
+
+  const handleFetchUploadFromDrive = async () => {
+    if (!contentDriveUrl.trim()) {
+      showToast('Please enter a Google Drive link or file ID.', 'error');
+      return;
+    }
+    setContentFetchingDrive(true);
+    try {
+      const token = getAdminToken();
+      const response = await fetch(`${API_BASE_URL}/admin/content/drive-fetch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ url: contentDriveUrl.trim() }),
+      });
+      if (!response.ok) {
+        let errMessage = 'Failed to download from Google Drive';
+        try {
+          const errJson = await response.json();
+          errMessage = errJson.message || errMessage;
+        } catch { }
+        throw new Error(errMessage);
+      }
+      const blob = await response.blob();
+      const xFilename = response.headers.get('x-filename');
+      let filename = 'google_drive_document.pdf';
+      if (xFilename) filename = decodeURIComponent(xFilename);
+
+      const rawFile = new File([blob], filename, {
+        type: blob.type || 'application/pdf',
+        lastModified: Date.now(),
+      });
+      const compResult = await compressUploadFile(rawFile);
+      setSelectedFiles((prev) => [...prev, compResult.file]);
+      setFileCompressionStats((prev) => ({
+        ...prev,
+        [compResult.file.name]: compResult,
+      }));
+      if (!contentTitle) {
+        setContentTitle(filename.replace(/\.[^/.]+$/, ''));
+      }
+      setContentDriveUrl('');
+      showToast(
+        `Imported "${filename}" from Google Drive! ${compResult.isCompressed
+          ? `Compressed from ${formatBytes(compResult.originalSize)} to ${formatBytes(compResult.compressedSize)} (-${compResult.ratio}%)`
+          : `(${formatBytes(compResult.originalSize)})`
+        }`,
+        'success',
+      );
+    } catch (err: any) {
+      showToast(err?.message || 'Could not import from Google Drive', 'error');
+    } finally {
+      setContentFetchingDrive(false);
+    }
+  };
+
   const handleUploadContent = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -465,6 +687,160 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
       showToast(err?.message || 'Failed to upload content', 'error');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleOpenEditContentModal = (item: any) => {
+    setEditingContentItem(item);
+    setEditContentTitle(item.title || '');
+    setEditContentType((item.type as any) || 'past_question');
+    setEditContentCourseId(item.courseId || item.course?.id || '');
+    setEditContentLevel(item.level || '');
+    setEditContentIsPaid(item.isPaid ?? true);
+    setEditContentPrice(item.price ?? 500);
+    setEditContentFile(null);
+    setEditContentFileStats(null);
+    setEditContentDriveUrl('');
+    setEditContentReplaceMode('keep');
+    setShowEditContentModal(true);
+  };
+
+  const handleEditContentFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    setEditContentFileCompressing(true);
+    try {
+      const compResult = await compressUploadFile(file);
+      setEditContentFile(compResult.file);
+      setEditContentFileStats(compResult);
+      if (compResult.isCompressed) {
+        showToast(
+          `Compressed from ${formatBytes(compResult.originalSize)} to ${formatBytes(compResult.compressedSize)} (-${compResult.ratio}%)`,
+          'success',
+        );
+      }
+    } finally {
+      setEditContentFileCompressing(false);
+    }
+  };
+
+  const handleFetchEditContentFromDrive = async () => {
+    if (!editContentDriveUrl.trim()) {
+      showToast('Please enter a Google Drive link or file ID.', 'error');
+      return;
+    }
+    setEditContentFetchingDrive(true);
+    try {
+      const token = getAdminToken();
+      const response = await fetch(`${API_BASE_URL}/admin/content/drive-fetch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ url: editContentDriveUrl.trim() }),
+      });
+      if (!response.ok) {
+        let errMessage = 'Failed to download from Google Drive';
+        try {
+          const errJson = await response.json();
+          errMessage = errJson.message || errMessage;
+        } catch { }
+        throw new Error(errMessage);
+      }
+      const blob = await response.blob();
+      const xFilename = response.headers.get('x-filename');
+      let filename = 'google_drive_document.pdf';
+      if (xFilename) filename = decodeURIComponent(xFilename);
+
+      const rawFile = new File([blob], filename, {
+        type: blob.type || 'application/pdf',
+        lastModified: Date.now(),
+      });
+      const compResult = await compressUploadFile(rawFile);
+      setEditContentFile(compResult.file);
+      setEditContentFileStats(compResult);
+      setEditContentDriveUrl('');
+      showToast(
+        `Imported "${filename}" from Google Drive! ${compResult.isCompressed
+          ? `Compressed from ${formatBytes(compResult.originalSize)} to ${formatBytes(compResult.compressedSize)} (-${compResult.ratio}%)`
+          : `(${formatBytes(compResult.originalSize)})`
+        }`,
+        'success',
+      );
+    } catch (err: any) {
+      showToast(err?.message || 'Could not import from Google Drive', 'error');
+    } finally {
+      setEditContentFetchingDrive(false);
+    }
+  };
+
+  const handleEditContentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingContentItem) return;
+    if (!editContentTitle.trim()) {
+      showToast('Title is required', 'error');
+      return;
+    }
+    setEditContentSubmitting(true);
+    try {
+      let updated: any;
+      if (editContentFile) {
+        const formData = new FormData();
+        formData.append('file', editContentFile);
+        formData.append('title', editContentTitle.trim());
+        formData.append('type', editContentType);
+        if (editContentCourseId) formData.append('courseId', editContentCourseId);
+        if (editContentLevel) formData.append('level', editContentLevel);
+        formData.append('isPaid', String(editContentIsPaid));
+        formData.append('price', String(editContentPrice));
+
+        updated = await adminApiRequest(`/admin/content/${editingContentItem.id}`, {
+          method: 'PATCH',
+          body: formData,
+        });
+      } else {
+        updated = await adminApiRequest(`/admin/content/${editingContentItem.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            title: editContentTitle.trim(),
+            type: editContentType,
+            courseId: editContentCourseId || null,
+            level: editContentLevel || null,
+            isPaid: editContentIsPaid,
+            price: Number(editContentPrice) || 0,
+          }),
+        });
+      }
+
+      showToast(`"${editContentTitle}" updated successfully!`, 'success');
+      setContents((prev) =>
+        prev.map((c) => (c.id === editingContentItem.id ? { ...c, ...updated } : c)),
+      );
+      setShowEditContentModal(false);
+      setEditingContentItem(null);
+      setEditContentFile(null);
+      setEditContentFileStats(null);
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to update resource', 'error');
+    } finally {
+      setEditContentSubmitting(false);
+    }
+  };
+
+  const executeDeleteContent = async (id: string, title: string) => {
+    setDeletingContentId(id);
+    try {
+      await adminApiRequest(`/admin/content/${id}`, {
+        method: 'DELETE',
+      });
+      showToast(`"${title}" deleted successfully`, 'success');
+      setContents((prev) => prev.filter((item) => item.id !== id));
+      setDeleteContentConfirmItem(null);
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete resource', 'error');
+    } finally {
+      setDeletingContentId(null);
     }
   };
 
@@ -537,19 +913,31 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
               Add Course
             </button>
             <button
-              onClick={() => setShowContentModal(true)}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-gold px-4 text-xs font-bold text-brand-navy hover:bg-brand-gold-light transition-all"
+              onClick={() => {
+                setContentUploadMode('drive');
+                setShowContentModal(true);
+              }}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-all shadow-sm"
+            >
+              <CloudDownload className="h-4 w-4 text-emerald-600" />
+              Upload from Google Drive
+            </button>
+            <button
+              onClick={() => {
+                setContentUploadMode('local');
+                setShowContentModal(true);
+              }}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-gold px-4 text-xs font-bold text-brand-navy hover:bg-brand-gold-light transition-all shadow-sm"
             >
               <Upload className="h-4 w-4" />
               Bulk Upload Material(s)
             </button>
             <button
               onClick={handleToggleDeactivation}
-              className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-4 text-xs font-semibold transition-all ${
-                activeSchool.status === 'deactivated'
+              className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-4 text-xs font-semibold transition-all ${activeSchool.status === 'deactivated'
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-600 hover:text-white'
                   : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-600 hover:text-white'
-              }`}
+                }`}
             >
               <Power className="h-4 w-4" />
               {activeSchool.status === 'deactivated' ? 'Reactivate Access' : 'Deactivate Access'}
@@ -666,82 +1054,170 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
           </button>
         }
       >
-        {courses.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead>
-                <tr className="border-b border-gray-100 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-text-secondary">
-                  <th className="py-3 px-4">Course Code</th>
-                  <th className="py-3 px-4">Course Name</th>
-                  <th className="py-3 px-4">Department / Faculty</th>
-                  <th className="py-3 px-4">Assigned Lecturer(s)</th>
-                  <th className="py-3 px-4">Level</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {courses.map((course) => (
-                  <tr key={course.id} className="border-b border-gray-100 text-sm hover:bg-surface">
-                    <td className="py-3 px-4 font-bold text-brand-navy">{course.code}</td>
-                    <td className="py-3 px-4 font-medium text-text-primary">{course.name}</td>
-                    <td className="py-3 px-4 text-text-secondary">
-                      <span className="font-semibold text-brand-navy">
-                        {course.department?.name || 'Department Linked'}
-                      </span>
-                      {course.department?.faculty?.name ? (
-                        <span className="block text-[11px] text-text-muted">{course.department.faculty.name}</span>
-                      ) : null}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex flex-wrap items-center gap-1.5 max-w-[200px]">
-                        {course.lecturers && course.lecturers.length > 0 ? (
-                          course.lecturers.map((l: any) => (
-                            <span
-                              key={l.id}
-                              className="inline-flex items-center gap-1 rounded-md bg-brand-navy/10 px-2 py-0.5 text-[11px] font-semibold text-brand-navy"
-                            >
-                              <UserCheck className="h-3 w-3" />
-                              {l.fullName}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-[11px] text-text-muted italic">Unassigned</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-text-secondary">{course.level || '300'}L</td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-status-optimal">
-                        <CheckCircle className="h-3.5 w-3.5" /> Active
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => openAssignCourseLecturers(course)}
-                          className="inline-flex items-center gap-1 rounded-lg bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100 transition-colors"
-                          title="Assign Lecturers to this Course"
-                        >
-                          <UserCheck className="h-3.5 w-3.5" />
-                          Assign
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingCourse(course)}
-                          className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
-                          title="Delete Course"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {courses.length > 0 && (
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search courses by code, title, lecturer..."
+                value={courseSearch}
+                onChange={(e) => setCourseSearch(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 bg-surface py-2 pl-9 pr-8 text-xs outline-none focus:border-brand-navy transition-colors"
+              />
+              {courseSearch && (
+                <button
+                  type="button"
+                  onClick={() => setCourseSearch('')}
+                  className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Department Searchable Filter */}
+            <div className="w-full sm:w-64">
+              <SearchableSelect
+                size="sm"
+                value={courseDepartmentFilter}
+                onChange={setCourseDepartmentFilter}
+                options={departmentSearchableOptions}
+                placeholder="Search department..."
+              />
+            </div>
+
+            {/* Level Filter Dropdown */}
+            <div className="w-full sm:w-36">
+              <select
+                value={courseLevelFilter}
+                onChange={(e) => setCourseLevelFilter(e.target.value)}
+                className="h-9 w-full rounded-xl border border-gray-200 bg-surface px-3 text-xs font-medium text-text-primary outline-none focus:border-brand-navy transition-colors"
+              >
+                <option value="all">All Levels</option>
+                <option value="100">100 Level</option>
+                <option value="200">200 Level</option>
+                <option value="300">300 Level</option>
+                <option value="400">400 Level</option>
+                <option value="500">500 Level</option>
+                <option value="600">600 Level</option>
+                <option value="700">700 Level</option>
+                <option value="800">800 Level</option>
+              </select>
+            </div>
+
+            {(courseSearch || courseDepartmentFilter !== 'all' || courseLevelFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCourseSearch('');
+                  setCourseDepartmentFilter('all');
+                  setCourseLevelFilter('all');
+                }}
+                className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-xs font-medium text-text-secondary hover:bg-gray-50 hover:text-text-primary transition-colors whitespace-nowrap"
+              >
+                Reset
+              </button>
+            )}
           </div>
+        )}
+
+        {courses.length > 0 ? (
+          filteredRegisteredCourses.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr className="border-b border-gray-100 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-text-secondary">
+                    <th className="py-3 px-4">Course Code</th>
+                    <th className="py-3 px-4">Course Name</th>
+                    <th className="py-3 px-4">Department / Faculty</th>
+                    <th className="py-3 px-4">Assigned Lecturer(s)</th>
+                    <th className="py-3 px-4">Level</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRegisteredCourses.map((course) => (
+                    <tr key={course.id} className="border-b border-gray-100 text-sm hover:bg-surface">
+                      <td className="py-3 px-4 font-bold text-brand-navy">{course.code}</td>
+                      <td className="py-3 px-4 font-medium text-text-primary">{course.name}</td>
+                      <td className="py-3 px-4 text-text-secondary">
+                        <span className="font-semibold text-brand-navy">
+                          {course.department?.name || 'Department Linked'}
+                        </span>
+                        {course.department?.faculty?.name ? (
+                          <span className="block text-[11px] text-text-muted">{course.department.faculty.name}</span>
+                        ) : null}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-wrap items-center gap-1.5 max-w-[200px]">
+                          {course.lecturers && course.lecturers.length > 0 ? (
+                            course.lecturers.map((l: any) => (
+                              <span
+                                key={l.id}
+                                className="inline-flex items-center gap-1 rounded-md bg-brand-navy/10 px-2 py-0.5 text-[11px] font-semibold text-brand-navy"
+                              >
+                                <UserCheck className="h-3 w-3" />
+                                {l.fullName}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[11px] text-text-muted italic">Unassigned</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-text-secondary">{course.level || '300'}L</td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-status-optimal">
+                          <CheckCircle className="h-3.5 w-3.5" /> Active
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openAssignCourseLecturers(course)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100 transition-colors"
+                            title="Assign Lecturers to this Course"
+                          >
+                            <UserCheck className="h-3.5 w-3.5" />
+                            Assign
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingCourse(course)}
+                            className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
+                            title="Delete Course"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-8 text-center">
+              <Search className="mx-auto h-8 w-8 text-text-muted" />
+              <p className="mt-2 text-sm font-bold text-text-primary">No Courses Match Your Filter</p>
+              <p className="mt-1 text-xs text-text-secondary">Try adjusting your search terms, department, or level filter.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCourseSearch('');
+                  setCourseDepartmentFilter('all');
+                  setCourseLevelFilter('all');
+                }}
+                className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-text-secondary hover:bg-gray-50 transition-colors"
+              >
+                Clear Filters
+              </button>
+            </div>
+          )
         ) : (
           <div className="py-8 text-center">
             <BookOpen className="mx-auto h-8 w-8 text-text-muted" />
@@ -759,67 +1235,209 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
       </Panel>
 
       {/* Uploaded Past Questions & Resources Panel */}
-      <Panel title={`Uploaded Past Questions & Educational Resources (${contents.length})`} subtitle="Catalog of uploaded past questions, slides, and learning materials for this campus.">
-        {contents.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead>
-                <tr className="border-b border-gray-100 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-text-secondary">
-                  <th className="py-3 px-4">Document Title</th>
-                  <th className="py-3 px-4">Type</th>
-                  <th className="py-3 px-4">Price / Access</th>
-                  <th className="py-3 px-4">Course</th>
-                  <th className="py-3 px-4">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contents.map((item) => (
-                  <tr key={item.id} className="border-b border-gray-100 text-sm hover:bg-surface">
-                    <td className="py-3 px-4 font-bold text-brand-navy">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-brand-navy" />
-                        <span>{item.title}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-xs font-semibold text-text-secondary uppercase">
-                      {item.type || 'past_question'}
-                    </td>
-                    <td className="py-3 px-4">
-                      {item.isPaid ? (
-                        <span className="rounded-md bg-brand-gold/20 px-2 py-0.5 text-xs font-bold text-brand-navy border border-brand-gold">
-                          ₦{item.price || 500}
-                        </span>
-                      ) : (
-                        <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
-                          FREE
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-text-secondary">
-                      {item.course?.code || item.course?.name || 'General'}
-                    </td>
-                    <td className="py-3 px-4">
-                      {item.downloadUrl && (
-                        <a
-                          href={item.downloadUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs font-bold text-brand-navy hover:underline"
-                        >
-                          View / Download
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <Panel
+        title={`Uploaded Past Questions & Educational Resources (${contents.length})`}
+        subtitle="Catalog of uploaded past questions, slides, and learning materials for this campus."
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setContentUploadMode('drive');
+                setShowContentModal(true);
+              }}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-all shadow-sm"
+            >
+              <CloudDownload className="h-3.5 w-3.5 text-emerald-600" />
+              Upload from Google Drive
+            </button>
+            <button
+              onClick={() => {
+                setContentUploadMode('local');
+                setShowContentModal(true);
+              }}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand-gold px-3.5 text-xs font-bold text-brand-navy hover:bg-brand-gold-light transition-all shadow-sm"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Upload Document
+            </button>
           </div>
+        }
+      >
+        {contents.length > 0 && (
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search documents by title or course..."
+                value={contentSearch}
+                onChange={(e) => setContentSearch(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 bg-surface py-2 pl-9 pr-8 text-xs outline-none focus:border-brand-navy transition-colors"
+              />
+              {contentSearch && (
+                <button
+                  type="button"
+                  onClick={() => setContentSearch('')}
+                  className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Type / Category Filter Dropdown */}
+            <div className="w-full sm:w-48">
+              <select
+                value={contentTypeFilter}
+                onChange={(e) => setContentTypeFilter(e.target.value as any)}
+                className="h-9 w-full rounded-xl border border-gray-200 bg-surface px-3 text-xs font-medium text-text-primary outline-none focus:border-brand-navy transition-colors"
+              >
+                <option value="all">All Document Types</option>
+                <option value="past_question">Past Questions</option>
+                <option value="resource">Academic Resources</option>
+                <option value="slides">Lecture Slides</option>
+              </select>
+            </div>
+
+            {(contentSearch || contentTypeFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setContentSearch('');
+                  setContentTypeFilter('all');
+                }}
+                className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-xs font-medium text-text-secondary hover:bg-gray-50 hover:text-text-primary transition-colors whitespace-nowrap"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        )}
+
+        {contents.length > 0 ? (
+          filteredContents.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr className="border-b border-gray-100 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-text-secondary">
+                    <th className="py-3 px-4">Document Title</th>
+                    <th className="py-3 px-4">Type</th>
+                    <th className="py-3 px-4">Price / Access</th>
+                    <th className="py-3 px-4">Course</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredContents.map((item) => (
+                    <tr key={item.id} className="border-b border-gray-100 text-sm hover:bg-surface transition-colors">
+                      <td className="py-3 px-4 font-bold text-brand-navy">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-brand-navy shrink-0" />
+                          <span className="truncate max-w-[280px]" title={item.title}>{item.title}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-xs font-semibold text-text-secondary uppercase">
+                        {item.type || 'past_question'}
+                      </td>
+                      <td className="py-3 px-4">
+                        {item.isPaid ? (
+                          <span className="rounded-md bg-brand-gold/20 px-2 py-0.5 text-xs font-bold text-brand-navy border border-brand-gold">
+                            ₦{item.price || 500}
+                          </span>
+                        ) : (
+                          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
+                            FREE
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-text-secondary">
+                        {item.course?.code || item.course?.name || 'General'}
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {item.downloadUrl && (
+                            <a
+                              href={item.downloadUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-bold text-brand-navy hover:bg-surface transition-colors"
+                              title="Download original document"
+                            >
+                              <Download className="h-3 w-3" />
+                              View
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditContentModal(item)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-brand-navy/10 px-2.5 py-1 text-xs font-bold text-brand-navy hover:bg-brand-navy/20 transition-colors"
+                            title="Edit Past Question / Resource"
+                          >
+                            <Edit className="h-3 w-3" />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteContentConfirmItem(item)}
+                            className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
+                            title="Delete Resource"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-8 text-center">
+              <Search className="mx-auto h-8 w-8 text-text-muted" />
+              <p className="mt-2 text-sm font-bold text-text-primary">No Documents Match Your Filter</p>
+              <p className="mt-1 text-xs text-text-secondary">Try adjusting your search keywords or category filter.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setContentSearch('');
+                  setContentTypeFilter('all');
+                }}
+                className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-text-secondary hover:bg-gray-50 transition-colors"
+              >
+                Clear Filters
+              </button>
+            </div>
+          )
         ) : (
           <div className="py-8 text-center">
             <Upload className="mx-auto h-8 w-8 text-text-muted" />
             <p className="mt-2 text-sm font-bold text-text-primary">No Past Questions Uploaded for this Campus Yet</p>
-            <p className="mt-1 text-xs text-text-secondary">Click "Upload Question" above to upload study materials for students.</p>
+            <p className="mt-1 text-xs text-text-secondary">Click below to upload study materials from your device or Google Drive.</p>
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setContentUploadMode('drive');
+                  setShowContentModal(true);
+                }}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-all shadow-sm"
+              >
+                <CloudDownload className="h-4 w-4 text-emerald-600" />
+                Upload from Google Drive
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setContentUploadMode('local');
+                  setShowContentModal(true);
+                }}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand-gold px-4 text-xs font-bold text-brand-navy hover:bg-brand-gold-light transition-all shadow-sm"
+              >
+                <Upload className="h-4 w-4" />
+                Upload from Device
+              </button>
+            </div>
           </div>
         )}
       </Panel>
@@ -954,8 +1572,17 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
           <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
             <div className="flex items-center justify-between border-b pb-3 mb-4">
               <h3 className="text-lg font-bold text-brand-navy flex items-center gap-2">
-                <Upload className="h-5 w-5 text-brand-gold" />
-                Upload Past Question / Material
+                {contentUploadMode === 'drive' ? (
+                  <>
+                    <CloudDownload className="h-5 w-5 text-emerald-600" />
+                    Upload from Google Drive
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-5 w-5 text-brand-gold" />
+                    Upload Past Question / Material
+                  </>
+                )}
               </h3>
               <button
                 type="button"
@@ -967,71 +1594,173 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
             </div>
 
             <form onSubmit={handleUploadContent} className="space-y-4">
-              {/* File Dropzone */}
+              {/* File Source Tabs */}
               <div>
-                <label className="block text-xs font-bold text-slate-900 mb-1">
-                  Select Document File(s) <span className="text-red-600 font-extrabold">* (Bulk multi-selection supported)</span>
+                <label className="block text-xs font-bold text-slate-900 mb-1.5">
+                  Document Source <span className="text-red-600 font-extrabold">*</span>
                 </label>
-
-                <input
-                  type="file"
-                  id="admin-file-upload-input"
-                  multiple
-                  accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    if (files.length > 0) {
-                      setSelectedFiles((prev) => [...prev, ...files]);
-                      if (files.length === 1 && selectedFiles.length === 0 && !contentTitle) {
-                        const nameWithoutExt = files[0].name.substring(0, files[0].name.lastIndexOf('.')) || files[0].name;
-                        setContentTitle(nameWithoutExt);
-                      }
-                    }
-                  }}
-                  className="hidden"
-                />
-
-                {selectedFiles.length === 0 ? (
-                  <label
-                    htmlFor="admin-file-upload-input"
-                    className="flex flex-col items-center justify-center w-full border-2 border-dashed border-slate-300 bg-slate-50 hover:border-brand-navy hover:bg-slate-100 rounded-xl p-5 cursor-pointer transition-colors"
+                <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-semibold mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setContentUploadMode('local')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 transition-all ${contentUploadMode === 'local'
+                        ? 'bg-brand-navy font-bold text-white shadow-sm'
+                        : 'text-text-secondary hover:text-text-primary'
+                      }`}
                   >
-                    <Upload className="h-7 w-7 text-brand-navy mb-2" />
-                    <p className="text-xs font-bold text-slate-900">Click to browse & upload multiple files</p>
-                    <p className="text-[11px] text-slate-500 font-semibold mt-1">
-                      PDF, Word (.docx/.doc), PNG, JPG
-                    </p>
-                  </label>
-                ) : (
-                  <div className="bg-slate-100 p-3 rounded-xl border border-slate-200">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-bold text-slate-700">{selectedFiles.length} file(s) selected</span>
-                      <label htmlFor="admin-file-upload-input" className="text-xs font-bold text-brand-navy hover:underline cursor-pointer">
-                        + Add More
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload from Device
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setContentUploadMode('drive')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 transition-all ${contentUploadMode === 'drive'
+                        ? 'bg-emerald-700 font-bold text-white shadow-sm'
+                        : 'text-emerald-800 hover:text-emerald-950'
+                      }`}
+                  >
+                    <CloudDownload className="h-3.5 w-3.5" />
+                    Import from Google Drive
+                  </button>
+                </div>
+
+                {contentUploadMode === 'local' ? (
+                  <div>
+                    <input
+                      type="file"
+                      id="admin-file-upload-input"
+                      multiple
+                      accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        handleUploadFilesSelect(files);
+                      }}
+                      className="hidden"
+                    />
+
+                    {selectedFiles.length === 0 ? (
+                      <label
+                        htmlFor="admin-file-upload-input"
+                        className="flex flex-col items-center justify-center w-full border-2 border-dashed border-slate-300 bg-slate-50 hover:border-brand-navy hover:bg-slate-100 rounded-xl p-5 cursor-pointer transition-colors"
+                      >
+                        {contentCompressingFile ? (
+                          <>
+                            <Loader2 className="h-7 w-7 text-brand-navy animate-spin mb-2" />
+                            <p className="text-xs font-bold text-slate-900">Compressing & optimizing PDF(s)...</p>
+                            <p className="text-[11px] text-slate-500 font-semibold mt-1">Shrinking file size before upload...</p>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-7 w-7 text-brand-navy mb-2" />
+                            <p className="text-xs font-bold text-slate-900">Click to browse & upload multiple files</p>
+                            <p className="text-[11px] text-slate-500 font-semibold mt-1">
+                              PDFs are automatically compressed client-side • Word (.docx/.doc), PNG, JPG
+                            </p>
+                          </>
+                        )}
                       </label>
-                    </div>
-                    <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
-                      {selectedFiles.map((f, i) => (
-                        <div key={i} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200">
-                          <div className="flex items-center gap-2 truncate">
-                            <FileText className="h-4 w-4 text-brand-navy flex-shrink-0" />
-                            <div className="truncate">
-                              <p className="text-xs font-bold text-slate-900 truncate">{f.name}</p>
-                              <p className="text-[10px] text-slate-500 font-semibold">
-                                {(f.size / (1024 * 1024)).toFixed(2)} MB
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedFiles(prev => prev.filter((_, idx) => idx !== i))}
-                            className="text-slate-400 hover:text-red-600 p-1"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
+                    ) : (
+                      <div className="bg-slate-100 p-3 rounded-xl border border-slate-200">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs font-bold text-slate-700">{selectedFiles.length} file(s) selected</span>
+                          <label htmlFor="admin-file-upload-input" className="text-xs font-bold text-brand-navy hover:underline cursor-pointer">
+                            + Add More
+                          </label>
                         </div>
-                      ))}
+                        <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                          {selectedFiles.map((f, i) => {
+                            const stat = fileCompressionStats[f.name];
+                            return (
+                              <div key={i} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200">
+                                <div className="flex items-center gap-2 truncate">
+                                  <FileText className="h-4 w-4 text-brand-navy flex-shrink-0" />
+                                  <div className="truncate">
+                                    <p className="text-xs font-bold text-slate-900 truncate">{f.name}</p>
+                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-semibold">
+                                      <span>{(f.size / (1024 * 1024)).toFixed(2)} MB</span>
+                                      {stat?.isCompressed && (
+                                        <span className="rounded bg-emerald-50 px-1 py-0.2 text-[10px] font-bold text-emerald-700">
+                                          Auto-compressed (-{stat.ratio}%)
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                                  className="text-slate-400 hover:text-red-600 p-1"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Enter a Google Drive link or file ID. Make sure access is set to <strong>&quot;Anyone with the link can view&quot;</strong>. The PDF will be downloaded and compressed client-side before uploading.
+                    </p>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Link2 className="absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={contentDriveUrl}
+                          onChange={(e) => setContentDriveUrl(e.target.value)}
+                          placeholder="https://drive.google.com/file/d/..."
+                          className="h-10 w-full rounded-xl border border-gray-200 bg-white pl-8 pr-3 text-xs outline-none focus:border-brand-navy"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleFetchUploadFromDrive}
+                        disabled={contentFetchingDrive || !contentDriveUrl.trim()}
+                        className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-brand-navy px-4 text-xs font-semibold text-white hover:bg-brand-navy-deep disabled:opacity-50 transition-all shrink-0"
+                      >
+                        {contentFetchingDrive ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Importing...
+                          </>
+                        ) : (
+                          <>
+                            <CloudDownload className="h-3.5 w-3.5" />
+                            Import & Compress
+                          </>
+                        )}
+                      </button>
                     </div>
+
+                    {selectedFiles.length > 0 && (
+                      <div className="mt-2 space-y-1.5 max-h-28 overflow-y-auto">
+                        <span className="text-[11px] font-bold text-slate-700 block">Imported Documents ({selectedFiles.length}):</span>
+                        {selectedFiles.map((f, i) => {
+                          const stat = fileCompressionStats[f.name];
+                          return (
+                            <div key={i} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 text-xs">
+                              <span className="font-bold text-brand-navy truncate max-w-[240px]">{f.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-emerald-700 font-bold">
+                                  {stat?.isCompressed ? `Auto-compressed (-${stat.ratio}%)` : `${(f.size / (1024 * 1024)).toFixed(2)} MB`}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                                  className="text-slate-400 hover:text-red-600"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1104,14 +1833,12 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
                     <button
                       type="button"
                       onClick={() => setIsPaid(!isPaid)}
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        isPaid ? 'bg-emerald-500' : 'bg-slate-300'
-                      }`}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isPaid ? 'bg-emerald-500' : 'bg-slate-300'
+                        }`}
                     >
                       <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          isPaid ? 'translate-x-5' : 'translate-x-0'
-                        }`}
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isPaid ? 'translate-x-5' : 'translate-x-0'
+                          }`}
                       />
                     </button>
                     <span className="text-xs font-bold text-slate-700">{isPaid ? 'Paid' : 'Free'}</span>
@@ -1142,10 +1869,27 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="h-10 rounded-xl bg-brand-gold px-5 text-xs font-bold text-brand-navy hover:bg-amber-400 disabled:opacity-50"
+                  disabled={submitting || contentCompressingFile || contentFetchingDrive || selectedFiles.length === 0}
+                  className="h-10 rounded-xl bg-brand-gold px-5 text-xs font-bold text-brand-navy hover:bg-amber-400 disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  {submitting ? 'Uploading...' : 'Upload Document'}
+                  {submitting ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : contentCompressingFile ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Compressing...
+                    </>
+                  ) : contentFetchingDrive ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Importing...
+                    </>
+                  ) : (
+                    'Upload Document'
+                  )}
                 </button>
               </div>
             </form>
@@ -1189,11 +1933,10 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
                   <div
                     key={tier.name}
                     onClick={() => setSelectedTierPlan(tier.name)}
-                    className={`cursor-pointer rounded-2xl border p-4 transition-all ${
-                      isSelected
+                    className={`cursor-pointer rounded-2xl border p-4 transition-all ${isSelected
                         ? 'border-brand-navy bg-brand-navy/5 ring-2 ring-brand-navy'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -1519,15 +2262,13 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
                     <div
                       key={lec.id}
                       onClick={() => toggleLecturerForCourse(lec.id)}
-                      className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition ${
-                        isChecked ? 'bg-sky-50 border border-sky-200' : 'hover:bg-gray-50'
-                      }`}
+                      className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition ${isChecked ? 'bg-sky-50 border border-sky-200' : 'hover:bg-gray-50'
+                        }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <div
-                          className={`h-5 w-5 rounded-lg border flex items-center justify-center transition ${
-                            isChecked ? 'bg-brand-navy border-brand-navy text-white' : 'border-gray-300 bg-white'
-                          }`}
+                          className={`h-5 w-5 rounded-lg border flex items-center justify-center transition ${isChecked ? 'bg-brand-navy border-brand-navy text-white' : 'border-gray-300 bg-white'
+                            }`}
                         >
                           {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
                         </div>
@@ -1566,6 +2307,343 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
                   <>
                     <UserCheck className="h-3.5 w-3.5" />
                     Save Assignments
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Past Question / Academic Resource */}
+      {showEditContentModal && editingContentItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-navy text-white">
+                  <Edit className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-brand-navy">Edit Past Question / Resource</h3>
+                  <p className="text-xs text-text-secondary">Update metadata, pricing, or replace document file</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditContentModal(false);
+                  setEditingContentItem(null);
+                }}
+                className="rounded-xl p-1 text-gray-400 hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditContentSubmit} className="mt-4 space-y-4 overflow-y-auto pr-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-900 mb-1">Document Title *</label>
+                <input
+                  type="text"
+                  value={editContentTitle}
+                  onChange={(e) => setEditContentTitle(e.target.value)}
+                  placeholder="e.g. MATH 110 PAST QUESTIONS 2023"
+                  required
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-surface px-4 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-brand-navy"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 mb-1">Type</label>
+                  <select
+                    value={editContentType}
+                    onChange={(e) => setEditContentType(e.target.value as any)}
+                    className="h-11 w-full rounded-xl border border-gray-200 bg-surface px-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-navy"
+                  >
+                    <option value="past_question">Past Question</option>
+                    <option value="resource">Course Material</option>
+                    <option value="slides">Lecture Slides</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 mb-1">Associated Course</label>
+                  <select
+                    value={editContentCourseId}
+                    onChange={(e) => setEditContentCourseId(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-gray-200 bg-surface px-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-navy"
+                  >
+                    <option value="">General (All Courses)</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code} - {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 mb-1">Academic Level</label>
+                  <select
+                    value={editContentLevel}
+                    onChange={(e) => setEditContentLevel(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-gray-200 bg-surface px-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-navy"
+                  >
+                    <option value="">General / All</option>
+                    <option value="100">100 Level</option>
+                    <option value="200">200 Level</option>
+                    <option value="300">300 Level</option>
+                    <option value="400">400 Level</option>
+                    <option value="500">500 Level</option>
+                    <option value="600">600 Level</option>
+                    <option value="700">700 Level</option>
+                    <option value="800">800 Level</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Pricing section */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-900 block">Pricing & Access</span>
+                    <span className="text-[11px] text-slate-500 font-semibold">
+                      {editContentIsPaid ? `Paid Document (₦${editContentPrice})` : 'Free Access for Students'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditContentIsPaid(!editContentIsPaid)}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${editContentIsPaid ? 'bg-emerald-500' : 'bg-slate-300'
+                        }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${editContentIsPaid ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                      />
+                    </button>
+                    <span className="text-xs font-bold text-slate-700">{editContentIsPaid ? 'Paid' : 'Free'}</span>
+                  </div>
+                </div>
+
+                {editContentIsPaid && (
+                  <div className="mt-3 pt-2 border-t border-slate-200">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Price (₦)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editContentPrice}
+                      onChange={(e) => setEditContentPrice(Number(e.target.value))}
+                      className="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-navy"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Document File Replacement */}
+              <div className="rounded-xl border border-gray-200 bg-slate-50/50 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-brand-navy flex items-center gap-1.5">
+                    <FileText className="h-4 w-4" />
+                    Document File
+                  </label>
+                  {editingContentItem.downloadUrl && (
+                    <a
+                      href={editingContentItem.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-bold text-brand-navy hover:underline flex items-center gap-1"
+                    >
+                      <Download className="h-3 w-3" /> Current Document
+                    </a>
+                  )}
+                </div>
+
+                {/* Replacement Options Tabs */}
+                <div className="flex rounded-lg bg-gray-200/80 p-0.5 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditContentReplaceMode('keep');
+                      setEditContentFile(null);
+                      setEditContentFileStats(null);
+                    }}
+                    className={`flex-1 rounded-md py-1.5 text-center transition-all ${editContentReplaceMode === 'keep' ? 'bg-white font-bold text-brand-navy shadow-sm' : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                  >
+                    Keep Current
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditContentReplaceMode('local')}
+                    className={`flex-1 rounded-md py-1.5 text-center transition-all ${editContentReplaceMode === 'local' ? 'bg-white font-bold text-brand-navy shadow-sm' : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                  >
+                    Upload New (Auto-Compressed)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditContentReplaceMode('drive')}
+                    className={`flex-1 rounded-md py-1.5 text-center transition-all ${editContentReplaceMode === 'drive' ? 'bg-white font-bold text-brand-navy shadow-sm' : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                  >
+                    Google Drive
+                  </button>
+                </div>
+
+                {editContentReplaceMode === 'local' && (
+                  <div className="space-y-2 pt-1">
+                    <label className="block text-[11px] font-medium text-text-secondary">
+                      Select replacement document (PDF, Word, Images). PDFs are automatically compressed client-side.
+                    </label>
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,application/pdf"
+                      onChange={handleEditContentFileSelect}
+                      className="block w-full text-xs text-text-secondary file:mr-3 file:rounded-lg file:border-0 file:bg-brand-navy file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-brand-navy-deep cursor-pointer"
+                    />
+                    {editContentFileCompressing && (
+                      <div className="flex items-center gap-2 text-xs font-semibold text-brand-navy">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Compressing & optimizing PDF before upload...</span>
+                      </div>
+                    )}
+                    {editContentFileStats && (
+                      <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs text-emerald-800">
+                        <Sparkles className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>
+                          {editContentFileStats.isCompressed
+                            ? `Compressed from ${formatBytes(editContentFileStats.originalSize)} to ${formatBytes(editContentFileStats.compressedSize)} (-${editContentFileStats.ratio}%)`
+                            : `File ready (${formatBytes(editContentFileStats.originalSize)})`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {editContentReplaceMode === 'drive' && (
+                  <div className="space-y-2 pt-1">
+                    <label className="block text-[11px] font-medium text-text-secondary">
+                      Paste a public Google Drive document link or file ID:
+                    </label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Link2 className="absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={editContentDriveUrl}
+                          onChange={(e) => setEditContentDriveUrl(e.target.value)}
+                          placeholder="https://drive.google.com/file/d/..."
+                          className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-3 text-xs outline-none focus:border-brand-navy"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleFetchEditContentFromDrive}
+                        disabled={editContentFetchingDrive || !editContentDriveUrl.trim()}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-navy px-3 text-xs font-semibold text-white hover:bg-brand-navy-deep disabled:opacity-50 transition-all shrink-0"
+                      >
+                        {editContentFetchingDrive ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Fetching...
+                          </>
+                        ) : (
+                          <>
+                            <CloudDownload className="h-3.5 w-3.5" />
+                            Fetch & Compress
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {editContentFileStats && (
+                      <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs text-emerald-800">
+                        <Sparkles className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>
+                          {editContentFileStats.isCompressed
+                            ? `Imported & compressed from ${formatBytes(editContentFileStats.originalSize)} to ${formatBytes(editContentFileStats.compressedSize)} (-${editContentFileStats.ratio}%)`
+                            : `Imported (${formatBytes(editContentFileStats.originalSize)})`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditContentModal(false);
+                    setEditingContentItem(null);
+                  }}
+                  className="h-10 rounded-xl border border-gray-200 px-4 text-xs font-semibold text-text-secondary hover:bg-surface"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editContentSubmitting || editContentFileCompressing || editContentFetchingDrive}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-brand-navy px-5 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 transition-all shadow-sm"
+                >
+                  {editContentSubmitting ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-3.5 w-3.5" />
+                      Save Changes
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Delete Content Confirmation */}
+      {deleteContentConfirmItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-100 text-red-600 shrink-0">
+                <AlertCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-brand-navy">Delete Document?</h3>
+                <p className="text-xs text-text-secondary">This action cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Are you sure you want to permanently delete <strong className="text-brand-navy">{deleteContentConfirmItem.title}</strong>? Students will no longer be able to view or download this study material.
+            </p>
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteContentConfirmItem(null)}
+                className="h-10 rounded-xl border border-gray-200 px-4 text-xs font-semibold text-text-secondary hover:bg-surface"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => executeDeleteContent(deleteContentConfirmItem.id, deleteContentConfirmItem.title)}
+                disabled={deletingContentId === deleteContentConfirmItem.id}
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-red-600 px-5 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50 transition-all shadow-sm"
+              >
+                {deletingContentId === deleteContentConfirmItem.id ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Confirm Delete
                   </>
                 )}
               </button>
