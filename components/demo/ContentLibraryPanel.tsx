@@ -334,12 +334,18 @@ export function ContentLibraryPanel() {
         formData.append('files', file);
       });
 
+      const selectedCourse = courses.find((c) => c.id === selectedCourseId);
+      const targetSchoolId =
+        user?.schoolId ||
+        selectedCourse?.schoolId ||
+        '4b428c2d-8de3-44a9-a2d3-d630c8df171d';
+
       const items = selectedFiles.map((file) => ({
         title: selectedFiles.length === 1 ? title || file.name.replace(/\.[^/.]+$/, '') : file.name.replace(/\.[^/.]+$/, ''),
         type,
         courseId: selectedCourseId || undefined,
         level: selectedLevel || undefined,
-        schoolId: user?.schoolId || undefined,
+        schoolId: targetSchoolId,
         isPaid: isPaid,
       }));
 

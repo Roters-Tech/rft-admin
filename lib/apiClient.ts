@@ -1,4 +1,6 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3006/v1';
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  'https://rft-backend-production-107d.up.railway.app/v1';
 
 export function resolveMediaUrl(url?: string | null): string {
   if (!url) return '';

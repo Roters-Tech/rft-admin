@@ -541,7 +541,7 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
         body: JSON.stringify({
           fullName: lecturerName,
           email: lecturerEmail,
-          schoolId: school.id,
+          schoolId: school?.id || id,
         }),
       });
 
@@ -663,7 +663,7 @@ export default function SchoolProfilePage({ params }: { params: Promise<{ id: st
         type: contentType,
         courseId: contentCourseId || undefined,
         level: contentLevel || undefined,
-        schoolId: school.id,
+        schoolId: school?.id || id,
         isPaid: isPaid,
         price: isPaid ? price : 0,
       }));
