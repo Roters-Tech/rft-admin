@@ -23,57 +23,15 @@ export function formatBytes(bytes: number, decimals = 1): string {
  */
 export async function compressPdfFile(file: File): Promise<CompressionResult> {
   const originalSize = file.size;
-
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-
-    // Reconstruct into a clean document to strip bloat/metadata/unreferenced streams
-    const targetDoc = await PDFDocument.create();
-    const pageIndices = sourceDoc.getPageIndices();
-    const copiedPages = await targetDoc.copyPages(sourceDoc, pageIndices);
-
-    for (const page of copiedPages) {
-      targetDoc.addPage(page);
-    }
-
-    // Save with object streams enabled
-    const compressedBytes = await targetDoc.save({ useObjectStreams: true });
-
-    if (compressedBytes.byteLength < originalSize) {
-      const compressedBlob = new Blob([compressedBytes as unknown as BlobPart], { type: 'application/pdf' });
-      const compressedFile = new File([compressedBlob], file.name, {
-        type: 'application/pdf',
-        lastModified: Date.now(),
-      });
-      const ratio = Math.round(((originalSize - compressedBytes.byteLength) / originalSize) * 100);
-
-      return {
-        file: compressedFile,
-        originalSize,
-        compressedSize: compressedBytes.byteLength,
-        ratio,
-        isCompressed: true,
-      };
-    }
-
-    return {
-      file,
-      originalSize,
-      compressedSize: originalSize,
-      ratio: 0,
-      isCompressed: false,
-    };
-  } catch (err) {
-    console.warn(`Could not compress PDF "${file.name}":`, err);
-    return {
-      file,
-      originalSize,
-      compressedSize: originalSize,
-      ratio: 0,
-      isCompressed: false,
-    };
-  }
+  // Always preserve original PDF buffer to guarantee 100% integrity, avoid blank white pages,
+  // and preserve embedded fonts, encryption dictionaries, and vector layout.
+  return {
+    file,
+    originalSize,
+    compressedSize: originalSize,
+    ratio: 0,
+    isCompressed: false,
+  };
 }
 
 /**
