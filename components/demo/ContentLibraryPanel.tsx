@@ -57,8 +57,6 @@ export function ContentLibraryPanel() {
   // Google Drive state in upload modal
   const [driveInputUrl, setDriveInputUrl] = useState('');
   const [fetchingDrive, setFetchingDrive] = useState(false);
-  const [driveErrorHint, setDriveErrorHint] = useState<string | null>(null);
-  const [stagedDriveUrl, setStagedDriveUrl] = useState<string>('');
 
   // Upload form metadata
   const [title, setTitle] = useState('');
@@ -224,41 +222,18 @@ export function ContentLibraryPanel() {
     }
   };
 
-  // Handle Direct Linking from Google Drive
-  const handleStageDriveLinkDirectly = (urlToStage: string, isForEdit = false) => {
-    const trimmed = urlToStage.trim();
-    if (!trimmed) {
-      showToast('Please enter a Google Drive link.', 'error');
-      return;
-    }
-    if (isForEdit) {
-      setEditDriveUrl(trimmed);
-      setEditFile(null);
-      setEditFileStats(null);
-      showToast('Google Drive link set as replacement file!', 'success');
-    } else {
-      setStagedDriveUrl(trimmed);
-      setDriveErrorHint(null);
-      if (!title) {
-        setTitle('Google Drive Resource');
-      }
-      showToast('Google Drive document linked! Ready to upload.', 'success');
-    }
-  };
-
   // Handle Google Drive Fetch & Compress
-  const handleFetchFromGoogleDrive = async (urlToFetch: string, isForEdit = false) => {
+  const handleFetchFromGoogleDrive = async (urlToFetch: string, isForEdit = false): Promise<File | null> => {
     const targetUrl = urlToFetch.trim();
     if (!targetUrl) {
       showToast('Please enter a Google Drive link or file ID.', 'error');
-      return;
+      return null;
     }
 
     if (isForEdit) {
       setEditFetchingDrive(true);
     } else {
       setFetchingDrive(true);
-      setDriveErrorHint(null);
     }
 
     try {
@@ -308,6 +283,7 @@ export function ContentLibraryPanel() {
           }`,
           'success',
         );
+        return compResult.file;
       } else {
         setSelectedFiles((prev) => [...prev, compResult.file]);
         setFileCompressionStats((prev) => ({
@@ -318,7 +294,6 @@ export function ContentLibraryPanel() {
           setTitle(filename.replace(/\.[^/.]+$/, ''));
         }
         setDriveInputUrl('');
-        setDriveErrorHint(null);
         showToast(
           `Imported "${filename}" from Google Drive! ${
             compResult.isCompressed
@@ -327,13 +302,11 @@ export function ContentLibraryPanel() {
           }`,
           'success',
         );
+        return compResult.file;
       }
     } catch (err: any) {
-      const msg = err?.message || 'Could not import from Google Drive';
-      if (!isForEdit) {
-        setDriveErrorHint(msg);
-      }
-      showToast(msg, 'error');
+      showToast(err?.message || 'Could not import from Google Drive', 'error');
+      return null;
     } finally {
       if (isForEdit) {
         setEditFetchingDrive(false);
@@ -350,48 +323,20 @@ export function ContentLibraryPanel() {
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const directDriveUrl = stagedDriveUrl || (uploadMode === 'drive' ? driveInputUrl.trim() : '');
+    let filesToUpload = [...selectedFiles];
 
-    if (selectedFiles.length === 0) {
-      if (directDriveUrl) {
-        setSubmitting(true);
-        try {
-          const selectedCourse = courses.find((c) => c.id === selectedCourseId);
-          const targetSchoolId =
-            user?.schoolId ||
-            selectedCourse?.schoolId ||
-            '4b428c2d-8de3-44a9-a2d3-d630c8df171d';
-
-          const singleItem = {
-            title: title.trim() || 'Google Drive Document',
-            type,
-            courseId: selectedCourseId || undefined,
-            level: selectedLevel || undefined,
-            schoolId: targetSchoolId,
-            isPaid,
-            downloadUrl: directDriveUrl,
-          };
-
-          await adminApiRequest('/admin/content', {
-            method: 'POST',
-            body: JSON.stringify(singleItem),
-          });
-
-          showToast(`"${singleItem.title}" uploaded & linked from Google Drive successfully!`, 'success');
-          fetchContentAndCourses();
-          setShowUploadModal(false);
-          setTitle('');
-          setDriveInputUrl('');
-          setStagedDriveUrl('');
-          setDriveErrorHint(null);
-        } catch (err: any) {
-          showToast(err?.message || 'Failed to link Google Drive document', 'error');
-        } finally {
-          setSubmitting(false);
-        }
+    if (filesToUpload.length === 0 && uploadMode === 'drive' && driveInputUrl.trim()) {
+      setSubmitting(true);
+      const fetched = await handleFetchFromGoogleDrive(driveInputUrl.trim(), false);
+      if (fetched) {
+        filesToUpload = [fetched];
+      } else {
+        setSubmitting(false);
         return;
       }
+    }
 
+    if (filesToUpload.length === 0) {
       showToast('Please select or import at least one file to upload', 'error');
       return;
     }
@@ -536,9 +481,14 @@ export function ContentLibraryPanel() {
     setEditSubmitting(true);
     try {
       let updated: any;
-      if (editFile) {
+      let fileToUse = editFile;
+      if (!fileToUse && editReplaceMode === 'drive' && editDriveUrl.trim()) {
+        fileToUse = await handleFetchFromGoogleDrive(editDriveUrl.trim(), true);
+      }
+
+      if (fileToUse) {
         const formData = new FormData();
-        formData.append('file', editFile);
+        formData.append('file', fileToUse);
         formData.append('title', editTitle.trim());
         formData.append('type', editType);
         if (editCourseId) formData.append('courseId', editCourseId);
@@ -559,9 +509,6 @@ export function ContentLibraryPanel() {
           isPaid: editIsPaid,
           price: Number(editPrice) || 0,
         };
-        if (editReplaceMode === 'drive' && editDriveUrl.trim()) {
-          payload.downloadUrl = editDriveUrl.trim();
-        }
 
         updated = await adminApiRequest(`/admin/content/${editingItem.id}`, {
           method: 'PATCH',
@@ -1097,39 +1044,23 @@ export function ContentLibraryPanel() {
                 )}
 
                 {editReplaceMode === 'drive' && (
-                  <div className="pt-1 space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="url"
-                        placeholder="Paste Google Drive share link..."
-                        value={editDriveUrl}
-                        onChange={(e) => setEditDriveUrl(e.target.value)}
-                        className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 font-medium"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleFetchFromGoogleDrive(editDriveUrl, true)}
-                        disabled={editFetchingDrive || !editDriveUrl.trim()}
-                        className="rounded-xl bg-brand-navy px-3 py-2 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 flex items-center gap-1.5"
-                      >
-                        {editFetchingDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="h-3.5 w-3.5" />}
-                        Fetch
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleStageDriveLinkDirectly(editDriveUrl, true)}
-                        disabled={!editDriveUrl.trim()}
-                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50 flex items-center gap-1.5"
-                      >
-                        <Link2 className="h-3.5 w-3.5" />
-                        Link Directly
-                      </button>
-                    </div>
-                    {editDriveUrl.trim() && !editFile && (
-                      <p className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Link staged directly: save to update document URL
-                      </p>
-                    )}
+                  <div className="pt-1 flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="Paste Google Drive share link..."
+                      value={editDriveUrl}
+                      onChange={(e) => setEditDriveUrl(e.target.value)}
+                      className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 font-medium"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleFetchFromGoogleDrive(editDriveUrl, true)}
+                      disabled={editFetchingDrive || !editDriveUrl.trim()}
+                      className="rounded-xl bg-brand-navy px-4 py-2 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                    >
+                      {editFetchingDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="h-3.5 w-3.5" />}
+                      Import
+                    </button>
                   </div>
                 )}
 
@@ -1286,14 +1217,14 @@ export function ContentLibraryPanel() {
 
                 {/* Google Drive Import Tab */}
                 {uploadMode === 'drive' && (
-                  <div className="space-y-2 bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                  <div className="space-y-2.5 bg-slate-50 border border-slate-200 rounded-xl p-3.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        <Link2 className="h-3.5 w-3.5 text-brand-navy" />
-                        Google Drive File or Document Link
+                        <CloudDownload className="h-4 w-4 text-brand-navy" />
+                        Google Drive Share Link
                       </label>
                       <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-                        <Sparkles className="h-3 w-3" /> Auto-Compressed
+                        <Sparkles className="h-3 w-3" /> Auto-Compressed & Stored in RFT
                       </span>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2">
@@ -1304,80 +1235,28 @@ export function ContentLibraryPanel() {
                         onChange={(e) => setDriveInputUrl(e.target.value)}
                         className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-brand-navy outline-none"
                       />
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleFetchFromGoogleDrive(driveInputUrl, false)}
-                          disabled={fetchingDrive || !driveInputUrl.trim()}
-                          className="rounded-xl bg-brand-navy px-3 py-2 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 flex items-center gap-1.5"
-                        >
-                          {fetchingDrive ? (
-                            <>
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              Fetching...
-                            </>
-                          ) : (
-                            <>
-                              <CloudDownload className="h-3.5 w-3.5" />
-                              Fetch to Cloud
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleStageDriveLinkDirectly(driveInputUrl, false)}
-                          disabled={!driveInputUrl.trim()}
-                          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50 flex items-center gap-1.5"
-                        >
-                          <Link2 className="h-3.5 w-3.5" />
-                          Link Directly
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleFetchFromGoogleDrive(driveInputUrl, false)}
+                        disabled={fetchingDrive || !driveInputUrl.trim()}
+                        className="rounded-xl bg-brand-navy px-4 py-2 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0"
+                      >
+                        {fetchingDrive ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Importing...
+                          </>
+                        ) : (
+                          <>
+                            <CloudDownload className="h-3.5 w-3.5" />
+                            Import from Google Drive
+                          </>
+                        )}
+                      </button>
                     </div>
 
-                    {driveErrorHint && (
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1.5">
-                        <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                          <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
-                          <span>Direct Download Notice</span>
-                        </div>
-                        <p className="text-[11px] text-amber-800 leading-relaxed">
-                          {driveErrorHint}
-                        </p>
-                        <div className="pt-1 flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleStageDriveLinkDirectly(driveInputUrl, false)}
-                            className="px-2.5 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1"
-                          >
-                            <Link2 className="h-3 w-3" /> Save as Direct Google Drive Link
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {stagedDriveUrl && (
-                      <div className="flex items-center justify-between p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs">
-                        <div className="flex items-center gap-2 truncate">
-                          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                          <div className="truncate">
-                            <span className="font-bold text-emerald-950 block truncate">Google Drive Link Ready to Upload</span>
-                            <span className="text-[10px] text-emerald-700 truncate block">{stagedDriveUrl}</span>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => { setStagedDriveUrl(''); setDriveInputUrl(''); }}
-                          className="text-emerald-700 hover:text-red-600 p-1 font-bold text-xs"
-                          title="Remove link"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
-
                     <p className="text-[11px] text-slate-500 font-medium">
-                      💡 Tip: &quot;Fetch to Cloud&quot; converts public Google Drive files to offline PDFs stored in RFT Cloud. &quot;Link Directly&quot; saves the document link instantly to be rendered via Google Drive in the app.
+                      💡 Paste any Google Drive, Docs, or Slides link (shared as &quot;Anyone with the link can view&quot;). The file will be downloaded, compressed, and permanently stored in RFT Cloud for your students.
                     </p>
                   </div>
                 )}
@@ -1528,7 +1407,7 @@ export function ContentLibraryPanel() {
                   </button>
                   <button
                     type="submit"
-                    disabled={submitting || (selectedFiles.length === 0 && !stagedDriveUrl && !(uploadMode === 'drive' && driveInputUrl.trim()))}
+                    disabled={submitting || (selectedFiles.length === 0 && !(uploadMode === 'drive' && driveInputUrl.trim()))}
                     className="rounded-xl bg-brand-navy px-5 py-2.5 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 flex items-center gap-1.5"
                   >
                     {submitting ? (
@@ -1539,7 +1418,7 @@ export function ContentLibraryPanel() {
                     ) : selectedFiles.length > 0 ? (
                       `Upload ${selectedFiles.length} File(s)`
                     ) : (
-                      'Upload & Link File'
+                      'Import & Upload File'
                     )}
                   </button>
                 </div>
