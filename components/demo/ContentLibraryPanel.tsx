@@ -323,20 +323,43 @@ export function ContentLibraryPanel() {
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let filesToUpload = [...selectedFiles];
-
-    if (filesToUpload.length === 0 && uploadMode === 'drive' && driveInputUrl.trim()) {
+    // If Google Drive link is provided and no local file was selected, use the direct server-side drive-import endpoint
+    if (selectedFiles.length === 0 && uploadMode === 'drive' && driveInputUrl.trim()) {
       setSubmitting(true);
-      const fetched = await handleFetchFromGoogleDrive(driveInputUrl.trim(), false);
-      if (fetched) {
-        filesToUpload = [fetched];
-      } else {
+      try {
+        const selectedCourse = courses.find((c) => c.id === selectedCourseId);
+        const targetSchoolId =
+          user?.schoolId ||
+          selectedCourse?.schoolId ||
+          '4b428c2d-8de3-44a9-a2d3-d630c8df171d';
+
+        const result = await adminApiRequest('/admin/content/drive-import', {
+          method: 'POST',
+          body: JSON.stringify({
+            url: driveInputUrl.trim(),
+            title: title.trim() || undefined,
+            type,
+            courseId: selectedCourseId || undefined,
+            level: selectedLevel || undefined,
+            schoolId: targetSchoolId,
+            isPaid,
+          }),
+        });
+
+        showToast(`"${result?.title || title || 'Document'}" imported & uploaded successfully!`, 'success');
+        fetchContentAndCourses();
+        setShowUploadModal(false);
+        setTitle('');
+        setDriveInputUrl('');
+      } catch (err: any) {
+        showToast(err?.message || 'Failed to import from Google Drive', 'error');
+      } finally {
         setSubmitting(false);
-        return;
       }
+      return;
     }
 
-    if (filesToUpload.length === 0) {
+    if (selectedFiles.length === 0) {
       showToast('Please select or import at least one file to upload', 'error');
       return;
     }
