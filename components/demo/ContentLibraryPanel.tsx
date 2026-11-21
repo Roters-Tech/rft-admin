@@ -20,7 +20,7 @@ import {
   Link2,
 } from 'lucide-react';
 import { Panel } from '@/components/ui/Panel';
-import { adminApiRequest, resolveMediaUrl, API_BASE_URL, getAdminToken } from '@/lib/apiClient';
+import { adminApiRequest, resolveMediaUrl, API_BASE_URL, getAdminToken, clearAdminApiCache } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/components/providers/ToastProvider';
 import { compressUploadFile, formatBytes, CompressionResult } from '@/lib/pdfCompressor';
@@ -323,8 +323,12 @@ export function ContentLibraryPanel() {
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // If Google Drive link is provided and no local file was selected, use the direct server-side drive-import endpoint
-    if (selectedFiles.length === 0 && uploadMode === 'drive' && driveInputUrl.trim()) {
+    if (uploadMode === 'drive') {
+      if (!driveInputUrl.trim()) {
+        showToast('Please enter a Google Drive link.', 'error');
+        return;
+      }
+
       setSubmitting(true);
       try {
         const selectedCourse = courses.find((c) => c.id === selectedCourseId);
@@ -346,6 +350,10 @@ export function ContentLibraryPanel() {
           }),
         });
 
+        clearAdminApiCache();
+        if (result && result.id) {
+          setContentList((prev) => [result, ...prev.filter((c) => c.id !== result.id)]);
+        }
         showToast(`"${result?.title || title || 'Document'}" imported & uploaded successfully!`, 'success');
         fetchContentAndCourses();
         setShowUploadModal(false);
@@ -360,7 +368,7 @@ export function ContentLibraryPanel() {
     }
 
     if (selectedFiles.length === 0) {
-      showToast('Please select or import at least one file to upload', 'error');
+      showToast('Please select at least one file to upload', 'error');
       return;
     }
 
@@ -394,6 +402,8 @@ export function ContentLibraryPanel() {
         method: 'POST',
         body: formData,
       });
+
+      clearAdminApiCache();
 
       if (response?.results) {
         setUploadResults(response.results);
@@ -1244,42 +1254,24 @@ export function ContentLibraryPanel() {
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                         <CloudDownload className="h-4 w-4 text-brand-navy" />
-                        Google Drive Share Link
+                        Google Drive Share Link <span className="text-red-500">*</span>
                       </label>
                       <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md flex items-center gap-1">
                         <Sparkles className="h-3 w-3" /> Auto-Compressed & Stored in RFT
                       </span>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
+                    <div>
                       <input
                         type="url"
-                        placeholder="https://drive.google.com/file/d/... or Docs link"
+                        placeholder="Paste link: https://drive.google.com/file/d/... or Docs / Slides link"
                         value={driveInputUrl}
                         onChange={(e) => setDriveInputUrl(e.target.value)}
-                        className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-brand-navy outline-none"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-brand-navy outline-none"
                       />
-                      <button
-                        type="button"
-                        onClick={() => handleFetchFromGoogleDrive(driveInputUrl, false)}
-                        disabled={fetchingDrive || !driveInputUrl.trim()}
-                        className="rounded-xl bg-brand-navy px-4 py-2 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0"
-                      >
-                        {fetchingDrive ? (
-                          <>
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            Importing...
-                          </>
-                        ) : (
-                          <>
-                            <CloudDownload className="h-3.5 w-3.5" />
-                            Import from Google Drive
-                          </>
-                        )}
-                      </button>
                     </div>
 
                     <p className="text-[11px] text-slate-500 font-medium">
-                      💡 Paste any Google Drive, Docs, or Slides link (shared as &quot;Anyone with the link can view&quot;). The file will be downloaded, compressed, and permanently stored in RFT Cloud for your students.
+                      💡 Paste any Google Drive, Docs, or Slides share link (set to &quot;Anyone with the link can view&quot;). Click &quot;Upload from Google Drive&quot; below to save it directly to RFT for your students.
                     </p>
                   </div>
                 )}
@@ -1430,18 +1422,24 @@ export function ContentLibraryPanel() {
                   </button>
                   <button
                     type="submit"
-                    disabled={submitting || (selectedFiles.length === 0 && !(uploadMode === 'drive' && driveInputUrl.trim()))}
+                    disabled={submitting || (uploadMode === 'local' ? selectedFiles.length === 0 : !driveInputUrl.trim())}
                     className="rounded-xl bg-brand-navy px-5 py-2.5 text-xs font-bold text-white hover:bg-brand-navy-deep disabled:opacity-50 flex items-center gap-1.5"
                   >
                     {submitting ? (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Uploading...
+                        {uploadMode === 'drive' ? 'Importing & Uploading from Google Drive...' : 'Uploading...'}
                       </>
-                    ) : selectedFiles.length > 0 ? (
-                      `Upload ${selectedFiles.length} File(s)`
+                    ) : uploadMode === 'drive' ? (
+                      <>
+                        <CloudDownload className="h-4 w-4" />
+                        Upload from Google Drive
+                      </>
                     ) : (
-                      'Import & Upload File'
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Upload {selectedFiles.length} File(s)
+                      </>
                     )}
                   </button>
                 </div>
